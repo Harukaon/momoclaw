@@ -16,7 +16,7 @@ export function createApp(tui: TUI, slashCommands: SlashCommand[]): AppUI {
   const chatView = new ChatView(tui);
   const inputView = new InputView(tui, slashCommands);
 
-  tui.children = [header, headerSpacer, chatView.container, inputView.editor];
+  tui.children = [header, headerSpacer, chatView.container, inputView.container];
   tui.setFocus(inputView.editor);
 
   return { chatView, inputView };

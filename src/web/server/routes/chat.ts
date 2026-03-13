@@ -1,0 +1,46 @@
+import type { FastifyPluginAsync } from "fastify";
+import type { SessionManager } from "../sessions.js";
+
+export function chatRoutes(manager: SessionManager): FastifyPluginAsync {
+  return async (app) => {
+    // Send a message to a session
+    app.post<{ Params: { id: string }; Body: { message: string } }>(
+      "/:id/messages",
+      async (req, reply) => {
+        const session = manager.get(req.params.id);
+        if (!session) {
+          reply.code(404);
+          return { error: "Session not found" };
+        }
+
+        const { message } = req.body as any;
+        if (!message || typeof message !== "string") {
+          reply.code(400);
+          return { error: "message is required and must be a string" };
+        }
+
+        if (session.agent.state.isStreaming) {
+          reply.code(409);
+          return { error: "Agent is already streaming" };
+        }
+
+        // Fire-and-forget: prompt runs in background, events flow via SSE
+        manager.prompt(req.params.id, message).catch(() => {
+          // errors are delivered via agent_end event
+        });
+
+        return { ok: true };
+      }
+    );
+
+    // Abort current streaming response
+    app.post<{ Params: { id: string } }>("/:id/abort", async (req, reply) => {
+      const aborted = manager.abort(req.params.id);
+      if (aborted === false && !manager.get(req.params.id)) {
+        reply.code(404);
+        return { error: "Session not found" };
+      }
+      return { aborted };
+    });
+  };
+}

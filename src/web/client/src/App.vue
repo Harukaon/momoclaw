@@ -1,0 +1,209 @@
+<template>
+  <div class="h-screen flex bg-gray-900 text-gray-100">
+    <!-- Sidebar -->
+    <Sidebar
+      :sessions="history.sessions.value"
+      :current-session-id="session.sessionId.value"
+      @new-chat="newSession"
+      @switch-session="switchSession"
+      @delete="onDeleteSession"
+      @rename="onRenameSession"
+    />
+
+    <!-- Main content -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- Header -->
+      <header class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-900/80 backdrop-blur">
+        <h1 class="text-lg font-bold text-blue-400">My Assistant</h1>
+        <div class="flex items-center gap-3">
+          <LocaleSwitch />
+          <ModelSelect
+            v-if="!showConfig"
+            :models="models"
+            :current-model="currentModel"
+            :disabled="chat.isStreaming.value"
+            @change="onModelChange"
+          />
+          <button
+            class="text-sm px-3 py-1 rounded-lg transition-colors"
+            :class="showConfig ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'"
+            @click="showConfig = !showConfig"
+          >
+            {{ t('config.title') }}
+          </button>
+        </div>
+      </header>
+
+      <!-- Config editor -->
+      <template v-if="showConfig">
+        <ConfigEditor
+          ref="configEditorRef"
+          :config="configData.config.value"
+          @save="onConfigSave"
+        />
+      </template>
+
+      <!-- Chat area -->
+      <template v-else>
+        <ChatView
+          :messages="chat.messages.value"
+          :tool-executions="chat.toolExecutions.value"
+          :error="chat.error.value"
+        />
+        <InputBox
+          :disabled="!session.sessionId.value || chat.isStreaming.value"
+          :is-streaming="chat.isStreaming.value"
+          @send="onSend"
+          @abort="onAbort"
+        />
+      </template>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from "vue";
+import ChatView from "./components/ChatView.vue";
+import InputBox from "./components/InputBox.vue";
+import ModelSelect from "./components/ModelSelect.vue";
+import Sidebar from "./components/Sidebar.vue";
+import LocaleSwitch from "./components/LocaleSwitch.vue";
+import ConfigEditor from "./components/ConfigEditor.vue";
+import { useSession } from "./composables/useSession";
+import { useChat } from "./composables/useChat";
+import { useHistory } from "./composables/useHistory";
+import { useConfig } from "./composables/useConfig";
+import { useLocale } from "./composables/useLocale";
+import { setLocale } from "./i18n";
+import type { Locale } from "./i18n";
+
+const session = useSession();
+const chat = useChat();
+const history = useHistory();
+const configData = useConfig();
+const { t } = useLocale();
+
+const models = ref<string[]>([]);
+const currentModel = ref("");
+const showConfig = ref(false);
+const configEditorRef = ref<InstanceType<typeof ConfigEditor> | null>(null);
+
+async function fetchModels() {
+  try {
+    const res = await fetch("/api/models");
+    const data = await res.json();
+    models.value = data.models;
+  } catch {
+    // will retry on next interaction
+  }
+}
+
+async function initSession() {
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    const ok = await session.loadSession(hash);
+    if (ok) {
+      currentModel.value = session.sessionModel.value;
+      chat.connectStream(hash);
+      return;
+    }
+  }
+  await createNewSession();
+}
+
+async function createNewSession() {
+  const id = await session.createSession();
+  window.location.hash = id;
+  chat.clearMessages();
+  chat.connectStream(id);
+  if (models.value.length > 0 && !currentModel.value) {
+    currentModel.value = models.value[0];
+  }
+}
+
+async function newSession() {
+  chat.disconnect();
+  await createNewSession();
+  history.fetchSessions();
+}
+
+async function switchSession(id: string) {
+  chat.disconnect();
+  chat.clearMessages();
+
+  const ok = await session.loadSession(id);
+  if (ok) {
+    window.location.hash = id;
+    currentModel.value = session.sessionModel.value;
+
+    // Restore messages into chat state
+    const res = await fetch(`/api/sessions/${id}`);
+    const data = await res.json();
+    if (data.messages) {
+      chat.restoreMessages(data.messages);
+    }
+    chat.connectStream(id);
+  }
+}
+
+async function onDeleteSession(id: string) {
+  await history.deleteSession(id);
+  if (session.sessionId.value === id) {
+    chat.disconnect();
+    await createNewSession();
+  }
+}
+
+async function onRenameSession(id: string, title: string) {
+  await history.renameSession(id, title);
+}
+
+async function onSend(message: string) {
+  const sid = session.sessionId.value;
+  if (!sid) return;
+  await chat.sendMessage(sid, message);
+}
+
+async function onAbort() {
+  const sid = session.sessionId.value;
+  if (!sid) return;
+  await chat.abortStream(sid);
+}
+
+async function onModelChange(model: string) {
+  const sid = session.sessionId.value;
+  if (!sid) return;
+  await chat.switchModel(sid, model);
+  currentModel.value = model;
+}
+
+async function onConfigSave(newConfig: any) {
+  const result = await configData.saveConfig(newConfig);
+  if (result.ok) {
+    configEditorRef.value?.showMessage(t("config.saved"), false);
+    // Apply locale change immediately
+    if (newConfig.locale) {
+      setLocale(newConfig.locale as Locale);
+    }
+    // Re-fetch models in case provider changed
+    await fetchModels();
+  } else {
+    configEditorRef.value?.showMessage(
+      `${t("config.validation_error")}: ${(result.errors ?? []).join("; ")}`,
+      true
+    );
+  }
+}
+
+onMounted(async () => {
+  // Load initial locale from config
+  await configData.fetchConfig();
+  if (configData.config.value?.locale) {
+    setLocale(configData.config.value.locale as Locale);
+  }
+
+  await fetchModels();
+  await initSession();
+  await history.fetchSessions();
+});
+</script>

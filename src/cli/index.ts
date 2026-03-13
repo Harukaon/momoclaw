@@ -1,16 +1,28 @@
 import { ProcessTerminal, TUI, matchesKey, Key } from "@mariozechner/pi-tui";
-import { loadConfig, initModelRegistry } from "./config.js";
-import { tools } from "./tools/index.js";
+import { loadConfig, initModelRegistry } from "../core/config.js";
+import { tools } from "../core/tools/index.js";
+import { SessionStore } from "../core/session-store.js";
+import { setLocale } from "../core/i18n/index.js";
 import { handleCommand, getSlashCommands } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
 import { createApp } from "./ui/app.js";
-import { createAgent } from "./agent.js";
+import { createCliAgent } from "./agent.js";
+import { v4 as uuidv4 } from "uuid";
 
 const config = loadConfig();
 const registry = await initModelRegistry(config);
 
+// Initialize locale
+setLocale(config.locale ?? "en");
+
+// Initialize session store
+const store = new SessionStore(config.sessionsDir);
+await store.init();
+
 const terminal = new ProcessTerminal();
 const tui = new TUI(terminal);
+
+let currentSessionId = uuidv4();
 
 function shutdown(): void {
   tui.stop();
@@ -22,9 +34,40 @@ process.on("SIGTERM", shutdown);
 
 const slashCommands = getSlashCommands();
 const { chatView, inputView } = createApp(tui, slashCommands);
-const agent = createAgent(config, registry, tools, chatView, inputView, tui);
+const agent = createCliAgent(config, registry, tools, chatView, inputView, tui);
 
-const cmdCtx: CommandContext = { agent, chatView, registry, tui };
+// Auto-save on agent_end
+agent.subscribe((event) => {
+  if (event.type === "agent_end") {
+    const messages = agent.state.messages.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    store
+      .save({
+        id: currentSessionId,
+        title: SessionStore.deriveTitle(messages),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        modelId: agent.state.model.id,
+        messages,
+      })
+      .catch(() => {});
+  }
+});
+
+const cmdCtx: CommandContext = {
+  agent,
+  chatView,
+  inputView,
+  registry,
+  tui,
+  store,
+  getCurrentSessionId: () => currentSessionId,
+  setCurrentSessionId: (id: string) => {
+    currentSessionId = id;
+  },
+};
 
 inputView.onSubmit(async (text) => {
   const trimmed = text.trim();

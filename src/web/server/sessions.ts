@@ -1,0 +1,269 @@
+import { v4 as uuidv4 } from "uuid";
+import { Agent } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { Config, ModelRegistry } from "../../core/config.js";
+import { createAgent } from "../../core/create-agent.js";
+import { SessionStore } from "../../core/session-store.js";
+import type { PersistedSession } from "../../core/session-store.js";
+
+export interface AgentEvent {
+  id: number;
+  type: string;
+  data: Record<string, any>;
+}
+
+export interface Session {
+  id: string;
+  agent: Agent;
+  eventBuffer: AgentEvent[];
+  lastEventId: number;
+  createdAt: number;
+  sseClients: Set<(event: AgentEvent) => void>;
+}
+
+export class SessionManager {
+  private sessions = new Map<string, Session>();
+  private config: Config;
+  private registry: ModelRegistry;
+  private tools: AgentTool<any>[];
+  private store: SessionStore;
+
+  constructor(
+    config: Config,
+    registry: ModelRegistry,
+    tools: AgentTool<any>[],
+    store: SessionStore
+  ) {
+    this.config = config;
+    this.registry = registry;
+    this.tools = tools;
+    this.store = store;
+  }
+
+  create(): Session {
+    const id = uuidv4();
+    const agent = createAgent(this.config, this.registry, this.tools);
+    const session = this.setupSession(id, agent);
+
+    // Persist immediately
+    this.persistSession(session).catch(() => {});
+
+    return session;
+  }
+
+  async resume(id: string): Promise<Session | null> {
+    // Already in memory
+    if (this.sessions.has(id)) return this.sessions.get(id)!;
+
+    const persisted = await this.store.load(id);
+    if (!persisted) return null;
+
+    const agent = createAgent(this.config, this.registry, this.tools);
+
+    // Restore model if possible
+    try {
+      const model = this.registry.resolve(persisted.modelId);
+      agent.setModel(model);
+    } catch {
+      // keep default model
+    }
+
+    // Replay messages
+    if (persisted.messages.length > 0) {
+      agent.replaceMessages(persisted.messages as any);
+    }
+
+    const session = this.setupSession(id, agent, persisted.createdAt);
+    return session;
+  }
+
+  private setupSession(
+    id: string,
+    agent: Agent,
+    createdAt?: number
+  ): Session {
+    const session: Session = {
+      id,
+      agent,
+      eventBuffer: [],
+      lastEventId: 0,
+      createdAt: createdAt ?? Date.now(),
+      sseClients: new Set(),
+    };
+
+    agent.subscribe((event) => {
+      const sseEvent = this.mapAgentEvent(session, event);
+      if (sseEvent) {
+        session.eventBuffer.push(sseEvent);
+        for (const client of session.sseClients) {
+          client(sseEvent);
+        }
+      }
+
+      // Persist on agent_end
+      if (event.type === "agent_end") {
+        this.persistSession(session).catch(() => {});
+      }
+    });
+
+    this.sessions.set(id, session);
+    return session;
+  }
+
+  private async persistSession(session: Session): Promise<void> {
+    const messages = session.agent.state.messages.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const persisted: PersistedSession = {
+      id: session.id,
+      title: SessionStore.deriveTitle(messages),
+      createdAt: session.createdAt,
+      updatedAt: Date.now(),
+      modelId: session.agent.state.model.id,
+      messages,
+    };
+
+    await this.store.save(persisted);
+  }
+
+  get(id: string): Session | undefined {
+    return this.sessions.get(id);
+  }
+
+  delete(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session) return false;
+    if (session.agent.state.isStreaming) {
+      session.agent.abort();
+    }
+    this.sessions.delete(id);
+    this.store.delete(id).catch(() => {});
+    return true;
+  }
+
+  async prompt(id: string, message: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    if (session.agent.state.isStreaming)
+      throw new Error("Agent is already streaming");
+    await session.agent.prompt(message);
+  }
+
+  abort(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session) return false;
+    if (session.agent.state.isStreaming) {
+      session.agent.abort();
+      return true;
+    }
+    return false;
+  }
+
+  setModel(id: string, modelId: string): void {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    const model = this.registry.resolve(modelId);
+    session.agent.setModel(model);
+  }
+
+  getModels(): string[] {
+    return this.registry.availableModels;
+  }
+
+  getStore(): SessionStore {
+    return this.store;
+  }
+
+  addSseClient(
+    id: string,
+    client: (event: AgentEvent) => void
+  ): (() => void) | null {
+    const session = this.sessions.get(id);
+    if (!session) return null;
+    session.sseClients.add(client);
+    return () => {
+      session.sseClients.delete(client);
+    };
+  }
+
+  getEventsSince(id: string, lastEventId: number): AgentEvent[] {
+    const session = this.sessions.get(id);
+    if (!session) return [];
+    return session.eventBuffer.filter((e) => e.id > lastEventId);
+  }
+
+  private mapAgentEvent(session: Session, event: any): AgentEvent | null {
+    const id = ++session.lastEventId;
+
+    switch (event.type) {
+      case "agent_start":
+        return { id, type: "agent_start", data: {} };
+
+      case "message_start":
+        return {
+          id,
+          type: "message_start",
+          data: { role: event.message?.role },
+        };
+
+      case "message_update": {
+        const ame = event.assistantMessageEvent;
+        if (ame?.type === "text_delta") {
+          return {
+            id,
+            type: "text_delta",
+            data: { delta: ame.delta },
+          };
+        }
+        if (ame?.type === "thinking_delta") {
+          return {
+            id,
+            type: "thinking_delta",
+            data: { delta: ame.delta },
+          };
+        }
+        return null;
+      }
+
+      case "message_end":
+        return {
+          id,
+          type: "message_end",
+          data: { role: event.message?.role },
+        };
+
+      case "tool_execution_start":
+        return {
+          id,
+          type: "tool_execution_start",
+          data: {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+          },
+        };
+
+      case "tool_execution_end":
+        return {
+          id,
+          type: "tool_execution_end",
+          data: {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            isError: event.isError,
+          },
+        };
+
+      case "agent_end":
+        return {
+          id,
+          type: "agent_end",
+          data: { error: session.agent.state.error },
+        };
+
+      default:
+        return null;
+    }
+  }
+}

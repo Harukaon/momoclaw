@@ -1,6 +1,7 @@
 import { Container, Markdown, Text, Loader, Spacer } from "@mariozechner/pi-tui";
 import type { TUI, Component } from "@mariozechner/pi-tui";
 import { markdownTheme, colors } from "../types.js";
+import { t } from "../../core/i18n/index.js";
 
 export class ChatView {
   readonly container = new Container();
@@ -14,7 +15,7 @@ export class ChatView {
   }
 
   appendUserMessage(text: string): void {
-    const label = new Text(colors.bold(colors.green("You")), 1, 0);
+    const label = new Text(colors.bold(colors.green(t("chat.you"))), 1, 0);
     const body = new Markdown(text, 2, 0, markdownTheme);
     const spacer = new Spacer(1);
     this.container.addChild(label);
@@ -24,7 +25,7 @@ export class ChatView {
   }
 
   startAssistantMessage(): void {
-    const label = new Text(colors.bold(colors.cyan("Assistant")), 1, 0);
+    const label = new Text(colors.bold(colors.cyan(t("chat.assistant"))), 1, 0);
     this.container.addChild(label);
 
     this.currentAssistantText = "";
@@ -52,7 +53,7 @@ export class ChatView {
 
   showToolStart(toolCallId: string, toolName: string): void {
     const wrapper = new Container();
-    const loader = new Loader(this.tui, colors.cyan, colors.dim, `Running ${toolName}...`);
+    const loader = new Loader(this.tui, colors.cyan, colors.dim, `${t("tool.running")} ${toolName}...`);
     wrapper.addChild(loader);
     this.container.addChild(wrapper);
     this.activeLoaders.set(toolCallId, { loader, wrapper });
@@ -67,14 +68,14 @@ export class ChatView {
       this.activeLoaders.delete(toolCallId);
     }
 
-    const status = isError ? colors.yellow("error") : colors.green("done");
+    const status = isError ? colors.yellow(t("tool.error")) : colors.green(t("tool.done"));
     const summary = new Text(`${colors.dim("tool")} ${colors.bold(toolName)} ${status}`, 2, 0);
     this.container.addChild(summary);
     this.tui.requestRender();
   }
 
   showError(message: string): void {
-    const errorText = new Text(colors.yellow(`Error: ${message}`), 1, 0);
+    const errorText = new Text(colors.yellow(`${t("error.prefix")}: ${message}`), 1, 0);
     const spacer = new Spacer(1);
     this.container.addChild(errorText);
     this.container.addChild(spacer);

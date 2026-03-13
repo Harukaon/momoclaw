@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { getModel, getModels } from "@mariozechner/pi-ai";
-import type { Model, Api } from "@mariozechner/pi-ai";
+import { getModel, getModels, getProviders } from "@mariozechner/pi-ai";
+import type { Model, Api, KnownApi, KnownProvider } from "@mariozechner/pi-ai";
 
 // --- Config types ---
 
-export type ApiType = "anthropic-messages" | "openai-completions";
+export type ApiType = KnownApi | (string & {});
 
 export interface ProviderConfig {
   api: ApiType;
@@ -18,6 +18,8 @@ export interface Config {
   defaultModel: string;
   systemPrompt: string;
   providers: Record<string, ProviderConfig>;
+  sessionsDir?: string;
+  locale?: "en" | "zh-CN";
 }
 
 const defaults: Config = {
@@ -92,30 +94,17 @@ function getStaticModels(providerName: string): string[] {
 }
 
 function buildRemoteModel(modelId: string, provider: ProviderConfig): Model<Api> {
-  const base = {
+  return {
     id: modelId,
     name: modelId,
+    api: provider.api as Api,
+    provider: provider.api.split("-")[0] as any,
+    baseUrl: provider.baseUrl!,
     reasoning: false,
     input: ["text", "image"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 200000,
     maxTokens: 16384,
-  };
-
-  if (provider.api === "anthropic-messages") {
-    return {
-      ...base,
-      api: "anthropic-messages" as const,
-      provider: "anthropic",
-      baseUrl: provider.baseUrl!,
-    };
-  }
-
-  return {
-    ...base,
-    api: "openai-completions" as const,
-    provider: "openai",
-    baseUrl: provider.baseUrl!,
   };
 }
 
@@ -157,4 +146,23 @@ export async function initModelRegistry(config: Config): Promise<ModelRegistry> 
       }
     },
   };
+}
+
+// --- Known API types and providers from pi-ai ---
+
+export const KNOWN_API_TYPES: string[] = [
+  "anthropic-messages",
+  "openai-completions",
+  "openai-responses",
+  "openai-codex-responses",
+  "azure-openai-responses",
+  "google-generative-ai",
+  "google-gemini-cli",
+  "google-vertex",
+  "bedrock-converse-stream",
+  "mistral-conversations",
+];
+
+export function getKnownProviders(): string[] {
+  return getProviders();
 }

@@ -1,0 +1,60 @@
+const en: Record<string, string> = {
+  // Chat
+  "chat.placeholder": "Type a message...",
+  "chat.send": "Send",
+  "chat.stop": "Stop",
+  "chat.new": "New Chat",
+  "chat.you": "You",
+  "chat.assistant": "Assistant",
+  "chat.system": "System",
+  "chat.empty": "Start a conversation...",
+
+  // History
+  "history.title": "History",
+  "history.empty": "No conversations yet",
+  "history.delete_confirm": "Delete this conversation?",
+  "history.rename": "Rename",
+  "history.delete": "Delete",
+
+  // Config
+  "config.title": "Settings",
+  "config.saved": "Settings saved",
+  "config.provider": "Provider",
+  "config.api_key": "API Key",
+  "config.base_url": "Base URL",
+  "config.api_type": "API Type",
+  "config.active_provider": "Active Provider",
+  "config.default_model": "Default Model",
+  "config.system_prompt": "System Prompt",
+  "config.locale": "Language",
+  "config.add_provider": "Add Provider",
+  "config.remove_provider": "Remove Provider",
+  "config.provider_name": "Provider Name",
+  "config.form_mode": "Form",
+  "config.json_mode": "JSON",
+  "config.save": "Save",
+  "config.cancel": "Cancel",
+  "config.validation_error": "Validation error",
+  "config.invalid_json": "Invalid JSON",
+
+  // Tool
+  "tool.running": "Running",
+  "tool.done": "done",
+  "tool.error": "error",
+
+  // Commands
+  "cmd.exit": "Exit the application",
+  "cmd.clear": "Clear the conversation",
+  "cmd.model": "Show or switch model (/model [name])",
+  "cmd.history": "Browse conversation history",
+  "cmd.unknown": "Unknown command",
+  "cmd.unknown_model": "Unknown model",
+  "cmd.switched_to": "Switched to",
+  "cmd.no_history": "No conversation history",
+  "cmd.session_loaded": "Session loaded",
+
+  // Errors
+  "error.prefix": "Error",
+};
+
+export default en;

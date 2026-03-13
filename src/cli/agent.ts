@@ -1,12 +1,12 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { TUI } from "@mariozechner/pi-tui";
-import type { Config, ModelRegistry } from "./config.js";
-import { getActiveProvider } from "./config.js";
+import type { Config, ModelRegistry } from "../core/config.js";
+import { getActiveProvider } from "../core/config.js";
 import type { ChatView } from "./ui/chat.js";
 import type { InputView } from "./ui/input.js";
 
-export function createAgent(
+export function createCliAgent(
   config: Config,
   registry: ModelRegistry,
   agentTools: AgentTool<any>[],
