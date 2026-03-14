@@ -2,10 +2,11 @@
   <div class="h-screen flex bg-gray-900 text-gray-100">
     <!-- Sidebar -->
     <Sidebar
-      :sessions="history.sessions.value"
+      :main-session="history.mainSession.value"
+      :sessions="history.subSessions.value"
       :current-session-id="session.sessionId.value"
       :streaming-sessions="streamingSessionIds"
-      @new-chat="newSession"
+      @new-chat="newSubAgent"
       @switch-session="switchSession"
       @delete="onDeleteSession"
       @rename="onRenameSession"
@@ -125,26 +126,28 @@ async function loadAndActivateSession(id: string): Promise<boolean> {
 }
 
 async function initSession() {
+  // Always ensure the main session exists first
+  const mainId = await session.ensureMainSession();
+
   const hash = window.location.hash.slice(1);
   if (hash) {
     const ok = await loadAndActivateSession(hash);
     if (ok) return;
   }
-  await createNewSession();
+
+  // Default to main agent
+  await loadAndActivateSession(mainId);
+  window.location.hash = mainId;
 }
 
-async function createNewSession() {
-  const id = await session.createSession();
+async function newSubAgent() {
+  const id = await session.createSubAgent();
   window.location.hash = id;
   chat.setActiveSession(id);
   chat.clearSession(id);
   if (models.value.length > 0 && !currentModel.value) {
     currentModel.value = models.value[0];
   }
-}
-
-async function newSession() {
-  await createNewSession();
   history.fetchSessions();
 }
 
@@ -168,10 +171,18 @@ async function switchSession(id: string) {
 }
 
 async function onDeleteSession(id: string) {
+  // Protect main agent on the frontend side
+  if (session.isMainSession(id)) return;
+
   await history.deleteSession(id);
   chat.removeSession(id);
   if (session.sessionId.value === id) {
-    await createNewSession();
+    // Switch back to main agent
+    const mainId = session.mainSessionId.value;
+    if (mainId) {
+      await loadAndActivateSession(mainId);
+      window.location.hash = mainId;
+    }
   }
 }
 

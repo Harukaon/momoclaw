@@ -2,6 +2,9 @@ import { ref, computed } from "vue";
 
 export interface SessionSummary {
   id: string;
+  type: "main" | "sub";
+  parentId?: string;
+  spawnedBy?: "user" | "agent";
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -36,8 +39,18 @@ export function useHistory() {
     if (s) s.title = title;
   }
 
+  const mainSession = computed(() =>
+    sessions.value.find((s) => s.type === "main") ?? null
+  );
+
+  const subSessions = computed(() =>
+    sessions.value.filter((s) => s.type !== "main")
+  );
+
   return {
     sessions: computed(() => sessions.value),
+    mainSession,
+    subSessions,
     fetchSessions,
     deleteSession,
     renameSession,

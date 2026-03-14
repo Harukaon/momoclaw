@@ -6,6 +6,7 @@ export class InputView {
   readonly editor: Editor;
   readonly container: Container;
   private tui: TUI;
+  private mainSubmitHandler: ((text: string) => void) | null = null;
 
   constructor(tui: TUI, slashCommands: SlashCommand[]) {
     this.tui = tui;
@@ -31,10 +32,24 @@ export class InputView {
   }
 
   onSubmit(handler: (text: string) => void): void {
+    this.mainSubmitHandler = handler;
     this.editor.onSubmit = (text: string) => {
       this.editor.addToHistory(text);
       this.editor.setText("");
       handler(text);
+    };
+  }
+
+  /** Temporarily override the submit handler for a single input, then restore the main handler. */
+  onSubmitOnce(handler: (text: string) => void): void {
+    this.editor.onSubmit = (text: string) => {
+      this.editor.addToHistory(text);
+      this.editor.setText("");
+      handler(text);
+      // Restore main handler
+      if (this.mainSubmitHandler) {
+        this.onSubmit(this.mainSubmitHandler);
+      }
     };
   }
 

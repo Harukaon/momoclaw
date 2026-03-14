@@ -9,11 +9,21 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
       return { sessions: summaries };
     });
 
-    // Create new session
+    // Get or create main session
     app.post("/", async (_req, reply) => {
-      const session = manager.create();
-      return { id: session.id, createdAt: session.createdAt };
+      const session = await manager.getOrCreateMain();
+      return { id: session.id, createdAt: session.createdAt, type: session.type };
     });
+
+    // Create sub-agent
+    app.post<{ Body: { parentId?: string; taskPrompt?: string } }>(
+      "/sub",
+      async (req, reply) => {
+        const { parentId, taskPrompt } = (req.body as any) ?? {};
+        const session = manager.createSubAgent(parentId, taskPrompt, "user");
+        return { id: session.id, createdAt: session.createdAt, type: session.type, parentId: session.parentId };
+      }
+    );
 
     // Get session info (try in-memory, then resume from disk)
     app.get<{ Params: { id: string } }>("/:id", async (req, reply) => {
@@ -35,6 +45,8 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
       }));
       return {
         id: session.id,
+        type: session.type,
+        parentId: session.parentId,
         createdAt: session.createdAt,
         isStreaming: session.agent.state.isStreaming,
         model: session.agent.state.model.id,
@@ -42,8 +54,14 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
       };
     });
 
-    // Delete session
+    // Delete session (main agent is protected)
     app.delete<{ Params: { id: string } }>("/:id", async (req, reply) => {
+      // Protect main agent
+      if (req.params.id === manager.getMainSessionId()) {
+        reply.code(403);
+        return { error: "Cannot delete main agent" };
+      }
+
       const deleted = manager.delete(req.params.id);
       if (!deleted) {
         const diskDeleted = await manager.getStore().delete(req.params.id);
@@ -70,6 +88,8 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
         }));
         return {
           id: session.id,
+          type: session.type,
+          parentId: session.parentId,
           createdAt: session.createdAt,
           isStreaming: session.agent.state.isStreaming,
           model: session.agent.state.model.id,

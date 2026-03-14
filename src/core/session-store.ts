@@ -10,6 +10,10 @@ export interface AgentMessage {
 
 export interface PersistedSession {
   id: string;
+  type: "main" | "sub";
+  parentId?: string;
+  spawnedBy?: "user" | "agent";
+  taskPrompt?: string;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -19,6 +23,9 @@ export interface PersistedSession {
 
 export interface SessionSummary {
   id: string;
+  type: "main" | "sub";
+  parentId?: string;
+  spawnedBy?: "user" | "agent";
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -88,6 +95,9 @@ export class SessionStore {
       if (session) {
         summaries.push({
           id: session.id,
+          type: session.type ?? "sub",
+          parentId: session.parentId,
+          spawnedBy: session.spawnedBy,
           title: session.title,
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
@@ -101,7 +111,24 @@ export class SessionStore {
     return summaries;
   }
 
-  static deriveTitle(messages: AgentMessage[]): string {
+  async findMain(): Promise<PersistedSession | null> {
+    let files: string[];
+    try {
+      files = await readdir(this.dir);
+    } catch {
+      return null;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".json") || file.includes(".tmp.")) continue;
+      const id = file.replace(".json", "");
+      const session = await this.load(id);
+      if (session && session.type === "main") return session;
+    }
+    return null;
+  }
+
+  static deriveTitle(messages: AgentMessage[], type?: "main" | "sub"): string {
+    if (type === "main") return "Main Agent";
     const firstUser = messages.find((m) => m.role === "user");
     if (!firstUser) return "New conversation";
     let content: string;

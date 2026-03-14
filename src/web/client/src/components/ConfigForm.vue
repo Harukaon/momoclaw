@@ -61,20 +61,26 @@
           <select
             v-model="form.providers[pName].api"
             class="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none border border-gray-600"
+            :disabled="isKnownProvider(pName)"
+            :class="{ 'opacity-60 cursor-not-allowed': isKnownProvider(pName) }"
           >
             <option v-for="api in knownApiTypes" :key="api" :value="api">{{ api }}</option>
           </select>
+          <p v-if="isKnownProvider(pName)" class="text-xs text-gray-500 mt-1">{{ t('config.api_type_auto') }}</p>
         </div>
 
         <!-- Auth type: API Key -->
         <template v-if="getAuthType(pName) === 'api-key'">
-          <!-- Base URL (optional) -->
+          <!-- Base URL (optional for known providers) -->
           <div>
-            <label class="block text-xs text-gray-400 mb-1">{{ t('config.base_url') }}</label>
+            <label class="block text-xs text-gray-400 mb-1">
+              {{ t('config.base_url') }}
+              <span v-if="isKnownProvider(pName)" class="text-gray-500 ml-1">({{ t('config.optional') }})</span>
+            </label>
             <input
               v-model="form.providers[pName].baseUrl"
               class="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none border border-gray-600"
-              placeholder="https://api.example.com"
+              :placeholder="isKnownProvider(pName) ? t('config.base_url_hint') : 'https://api.example.com'"
             />
           </div>
           <!-- API Key -->
@@ -97,6 +103,22 @@
                 {{ showKeys[pName] ? '🔒' : '👁' }}
               </button>
             </div>
+          </div>
+          <!-- OAuth status for providers that also support OAuth -->
+          <div v-if="oauthStatuses[pName]" class="flex items-center gap-2 text-xs">
+            <template v-if="oauthStatuses[pName]?.authenticated">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-green-900/50 text-green-400 border border-green-700">
+                OAuth {{ t('config.oauth_authenticated') }}
+              </span>
+              <span v-if="oauthStatuses[pName]?.expires" class="text-gray-500">
+                {{ t('config.oauth_expires') }}: {{ formatExpiry(oauthStatuses[pName].expires) }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-gray-700 text-gray-400 border border-gray-600">
+                OAuth {{ t('config.oauth_not_authenticated') }}
+              </span>
+            </template>
           </div>
         </template>
 
@@ -121,6 +143,22 @@
                 {{ showKeys[pName] ? '🔒' : '👁' }}
               </button>
             </div>
+          </div>
+          <!-- OAuth status for github-copilot -->
+          <div v-if="oauthStatuses[pName]" class="flex items-center gap-2 text-xs">
+            <template v-if="oauthStatuses[pName]?.authenticated">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-green-900/50 text-green-400 border border-green-700">
+                OAuth {{ t('config.oauth_authenticated') }}
+              </span>
+              <span v-if="oauthStatuses[pName]?.expires" class="text-gray-500">
+                {{ t('config.oauth_expires') }}: {{ formatExpiry(oauthStatuses[pName].expires) }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-gray-700 text-gray-400 border border-gray-600">
+                OAuth {{ t('config.oauth_not_authenticated') }}
+              </span>
+            </template>
           </div>
         </template>
 
@@ -212,9 +250,26 @@
 
         <!-- Auth type: OAuth -->
         <template v-else-if="getAuthType(pName) === 'oauth'">
-          <div class="bg-gray-800/50 rounded-lg p-3 text-xs text-gray-400 space-y-1">
+          <div class="bg-gray-800/50 rounded-lg p-3 text-xs text-gray-400 space-y-2">
             <p class="font-medium text-gray-300">{{ t('config.oauth_hint') }}</p>
             <p>{{ t('config.oauth_env') }}: <code>{{ getEnvVar(pName) }}</code></p>
+            <!-- OAuth status badge -->
+            <div class="flex items-center gap-2 mt-2">
+              <template v-if="oauthStatuses[pName]?.authenticated">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-900/50 text-green-400 border border-green-700">
+                  {{ t('config.oauth_authenticated') }}
+                </span>
+                <span v-if="oauthStatuses[pName]?.expires" class="text-gray-500">
+                  {{ t('config.oauth_expires') }}: {{ formatExpiry(oauthStatuses[pName].expires) }}
+                </span>
+              </template>
+              <template v-else>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-400 border border-gray-600">
+                  {{ t('config.oauth_not_authenticated') }}
+                </span>
+                <span class="text-gray-500">{{ t('config.oauth_cli_hint') }}</span>
+              </template>
+            </div>
           </div>
         </template>
 
@@ -246,8 +301,8 @@
           </div>
         </template>
 
-        <!-- Default Model (all providers) -->
-        <div>
+        <!-- Default Model (hide for oauth providers — they use device flow, no model config needed) -->
+        <div v-if="getAuthType(pName) !== 'oauth'">
           <label class="block text-xs text-gray-400 mb-1">{{ t('config.default_model') }}</label>
           <div class="flex gap-2">
             <select
@@ -356,6 +411,7 @@ const knownProviders = ref<string[]>([]);
 const showKeys = reactive<Record<string, boolean>>({});
 const providerModels = reactive<Record<string, string[]>>({});
 const loadingModels = reactive<Record<string, boolean>>({});
+const oauthStatuses = reactive<Record<string, { authenticated: boolean; expires?: number }>>({});
 const newProviderName = ref("");
 const customProviderName = ref("");
 
@@ -447,6 +503,10 @@ function getAuthType(providerName: string): AuthType {
   return providerAuthTypes[providerName] ?? "custom";
 }
 
+function isKnownProvider(name: string): boolean {
+  return name in providerApiDefaults;
+}
+
 function getEnvVar(providerName: string): string {
   return providerEnvVars[providerName] ?? "";
 }
@@ -468,6 +528,9 @@ watch(
     }
     if (cfg._meta?.knownProviders) {
       knownProviders.value = cfg._meta.knownProviders;
+    }
+    if (cfg._meta?.oauthStatuses) {
+      Object.assign(oauthStatuses, cfg._meta.oauthStatuses);
     }
   },
   { immediate: true }
@@ -524,6 +587,10 @@ async function fetchModels(providerName: string) {
   } finally {
     loadingModels[providerName] = false;
   }
+}
+
+function formatExpiry(timestamp: number): string {
+  return new Date(timestamp).toLocaleString();
 }
 
 function save() {

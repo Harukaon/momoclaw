@@ -1,8 +1,10 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { TUI } from "@mariozechner/pi-tui";
+import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
 import type { Config, ModelRegistry } from "../core/config.js";
 import { getActiveProvider, getActiveModel } from "../core/config.js";
+import type { OAuthStore } from "../core/oauth-store.js";
 import type { ChatView } from "./ui/chat.js";
 import type { InputView } from "./ui/input.js";
 
@@ -13,9 +15,11 @@ export function createCliAgent(
   chatView: ChatView,
   inputView: InputView,
   tui: TUI,
+  oauthStore?: OAuthStore,
 ): Agent {
   const model = registry.resolve(getActiveModel(config));
   const provider = getActiveProvider(config);
+  const activeProviderName = config.activeProvider;
 
   const agent = new Agent({
     initialState: {
@@ -23,7 +27,27 @@ export function createCliAgent(
       model,
       tools: agentTools,
     },
-    getApiKey: async (_providerName: string) => provider.apiKey || undefined,
+    getApiKey: async (_providerName: string) => {
+      // 1. Config apiKey — highest priority
+      if (provider.apiKey) return provider.apiKey;
+
+      // 2. OAuth credentials (auto-refresh)
+      if (oauthStore) {
+        try {
+          const allCreds = await oauthStore.loadAll();
+          const result = await getOAuthApiKey(activeProviderName, allCreds);
+          if (result) {
+            await oauthStore.save(activeProviderName, result.newCredentials);
+            return result.apiKey;
+          }
+        } catch {
+          // Fall through to undefined
+        }
+      }
+
+      // 3. undefined — Agent falls back to env vars
+      return undefined;
+    },
   });
 
   agent.subscribe((event) => {

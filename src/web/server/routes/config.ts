@@ -9,10 +9,13 @@ import {
   isApiKeyMasked,
 } from "../../../core/config-validator.js";
 import { KNOWN_API_TYPES, getKnownProviders, fetchModelsForProvider } from "../../../core/config.js";
+import type { OAuthStore } from "../../../core/oauth-store.js";
+import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 
 export function configRoutes(
   getConfig: () => Config,
-  onConfigSaved: () => Promise<void>
+  onConfigSaved: () => Promise<void>,
+  oauthStore?: OAuthStore
 ): FastifyPluginAsync {
   return async (app) => {
     const configPath = resolve(process.cwd(), "config.json");
@@ -28,11 +31,27 @@ export function configRoutes(
           }
         }
       }
+
+      // Build OAuth status map
+      const oauthStatuses: Record<string, { authenticated: boolean; expires?: number }> = {};
+      if (oauthStore) {
+        const allCreds = await oauthStore.loadAll();
+        const providers = getOAuthProviders();
+        for (const p of providers) {
+          const creds = allCreds[p.id];
+          oauthStatuses[p.id] = {
+            authenticated: !!creds,
+            expires: creds?.expires,
+          };
+        }
+      }
+
       return {
         ...masked,
         _meta: {
           knownApiTypes: KNOWN_API_TYPES,
           knownProviders: getKnownProviders(),
+          oauthStatuses,
         },
       };
     });
@@ -100,6 +119,24 @@ export function configRoutes(
       }
       const models = await fetchModelsForProvider(name, provider);
       return { models };
+    });
+
+    // GET /api/config/oauth/status — return OAuth authentication status for all providers
+    app.get("/oauth/status", async () => {
+      const statuses: Record<string, { authenticated: boolean; expires?: number; name: string }> = {};
+      if (oauthStore) {
+        const allCreds = await oauthStore.loadAll();
+        const providers = getOAuthProviders();
+        for (const p of providers) {
+          const creds = allCreds[p.id];
+          statuses[p.id] = {
+            name: p.name,
+            authenticated: !!creds,
+            expires: creds?.expires,
+          };
+        }
+      }
+      return { statuses };
     });
   };
 }

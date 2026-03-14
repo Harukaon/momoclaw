@@ -52,6 +52,12 @@ const zhCN: Record<string, string> = {
   "approval.denied": "命令已被用户拒绝",
   "approval.timeout": "审批超时",
 
+  // Agent
+  "agent.main": "主代理",
+  "agent.sub": "子代理",
+  "agent.spawn_sub_agent": "派生子代理来处理特定任务",
+  "agent.sub_agent_result": "子代理已完成",
+
   // Commands
   "cmd.exit": "退出应用",
   "cmd.clear": "清空对话",
@@ -71,6 +77,14 @@ const zhCN: Record<string, string> = {
   "cmd.switched_to": "已切换到",
   "cmd.no_history": "没有对话历史",
   "cmd.session_loaded": "会话已加载",
+  "cmd.login": "登录 OAuth 服务商",
+  "cmd.logout": "登出 OAuth 服务商",
+  "cmd.login_select": "正在登录",
+  "cmd.login_success": "登录成功",
+  "cmd.login_failed": "登录失败",
+  "cmd.logout_select": "选择要登出的服务商",
+  "cmd.logout_success": "已登出",
+  "cmd.no_oauth_providers": "没有可用的 OAuth 服务商",
 
   // Errors
   "error.prefix": "错误",

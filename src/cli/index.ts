@@ -3,6 +3,7 @@ import { loadConfig, initModelRegistry } from "../core/config.js";
 import { tools, createShellExecTool, createApprovalGate } from "../core/tools/index.js";
 import type { ApprovalDecision } from "../core/tools/index.js";
 import { SessionStore } from "../core/session-store.js";
+import { OAuthStore } from "../core/oauth-store.js";
 import { setLocale, t } from "../core/i18n/index.js";
 import { handleCommand, getSlashCommands } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -10,6 +11,7 @@ import { selectListTheme } from "./types.js";
 import { createApp } from "./ui/app.js";
 import { createCliAgent } from "./agent.js";
 import { v4 as uuidv4 } from "uuid";
+import { resolve } from "node:path";
 
 const config = loadConfig();
 const registry = await initModelRegistry(config);
@@ -20,6 +22,11 @@ setLocale(config.locale ?? "en");
 // Initialize session store
 const store = new SessionStore(config.sessionsDir);
 await store.init();
+
+// Initialize OAuth store (same directory as config.json)
+const configDir = resolve(process.cwd());
+const oauthStore = new OAuthStore(configDir);
+await oauthStore.init();
 
 const terminal = new ProcessTerminal();
 const tui = new TUI(terminal);
@@ -71,7 +78,7 @@ approvalGate.requestApproval = async (req) => {
 const shellExecTool = createShellExecTool(approvalGate);
 const allTools = [...tools, shellExecTool];
 
-const agent = createCliAgent(config, registry, allTools, chatView, inputView, tui);
+const agent = createCliAgent(config, registry, allTools, chatView, inputView, tui, oauthStore);
 
 // Auto-save on agent_end
 agent.subscribe((event) => {
@@ -83,6 +90,8 @@ agent.subscribe((event) => {
     store
       .save({
         id: currentSessionId,
+        type: "sub",
+        spawnedBy: "user",
         title: SessionStore.deriveTitle(messages),
         createdAt: sessionCreatedAt,
         updatedAt: Date.now(),
@@ -100,6 +109,7 @@ const cmdCtx: CommandContext = {
   registry,
   tui,
   store,
+  oauthStore,
   getCurrentSessionId: () => currentSessionId,
   setCurrentSessionId: (id: string) => {
     currentSessionId = id;

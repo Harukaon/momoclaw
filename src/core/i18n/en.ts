@@ -52,6 +52,12 @@ const en: Record<string, string> = {
   "approval.denied": "Command denied by user",
   "approval.timeout": "Approval timed out",
 
+  // Agent
+  "agent.main": "Main Agent",
+  "agent.sub": "Sub-Agent",
+  "agent.spawn_sub_agent": "Spawn a sub-agent to handle a specific task",
+  "agent.sub_agent_result": "Sub-agent completed",
+
   // Commands
   "cmd.exit": "Exit the application",
   "cmd.clear": "Clear the conversation",
@@ -71,6 +77,14 @@ const en: Record<string, string> = {
   "cmd.switched_to": "Switched to",
   "cmd.no_history": "No conversation history",
   "cmd.session_loaded": "Session loaded",
+  "cmd.login": "Login to OAuth provider",
+  "cmd.logout": "Logout from OAuth provider",
+  "cmd.login_select": "Logging in to",
+  "cmd.login_success": "Login successful",
+  "cmd.login_failed": "Login failed",
+  "cmd.logout_select": "Select provider to logout",
+  "cmd.logout_success": "Logged out",
+  "cmd.no_oauth_providers": "No OAuth providers available",
 
   // Errors
   "error.prefix": "Error",

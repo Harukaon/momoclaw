@@ -11,6 +11,7 @@ import {
   type ApprovalGate,
   type ApprovalDecision,
 } from "../../core/tools/index.js";
+import type { OAuthStore } from "../../core/oauth-store.js";
 
 export interface AgentEvent {
   id: number;
@@ -20,6 +21,8 @@ export interface AgentEvent {
 
 export interface Session {
   id: string;
+  type: "main" | "sub";
+  parentId?: string;
   agent: Agent;
   eventBuffer: AgentEvent[];
   lastEventId: number;
@@ -35,23 +38,72 @@ export class SessionManager {
   private getRegistry: () => ModelRegistry;
   private tools: AgentTool<any>[];
   private store: SessionStore;
+  private oauthStore?: OAuthStore;
 
   constructor(
     getConfig: () => Config,
     getRegistry: () => ModelRegistry,
     tools: AgentTool<any>[],
-    store: SessionStore
+    store: SessionStore,
+    oauthStore?: OAuthStore
   ) {
     this.getConfig = getConfig;
     this.getRegistry = getRegistry;
     this.tools = tools;
     this.store = store;
+    this.oauthStore = oauthStore;
+  }
+
+  private mainSessionId: string | null = null;
+
+  async getOrCreateMain(): Promise<Session> {
+    // Check in-memory first
+    if (this.mainSessionId && this.sessions.has(this.mainSessionId)) {
+      return this.sessions.get(this.mainSessionId)!;
+    }
+
+    // Check persisted sessions
+    const persisted = await this.store.findMain();
+    if (persisted) {
+      const session = await this.resume(persisted.id);
+      if (session) {
+        this.mainSessionId = session.id;
+        return session;
+      }
+    }
+
+    // Create new main session
+    const id = uuidv4();
+    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, undefined, "main");
+    this.mainSessionId = id;
+
+    // Persist immediately
+    this.persistSession(session).catch(() => {});
+
+    return session;
+  }
+
+  createSubAgent(parentId?: string, taskPrompt?: string, spawnedBy: "user" | "agent" = "user"): Session {
+    const id = uuidv4();
+    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
+    const resolvedParentId = parentId ?? this.mainSessionId ?? undefined;
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, undefined, "sub", resolvedParentId);
+
+    // Persist immediately with sub-agent metadata
+    this.persistSubSession(session, spawnedBy, taskPrompt).catch(() => {});
+
+    return session;
+  }
+
+  getMainSessionId(): string | null {
+    return this.mainSessionId;
   }
 
   create(): Session {
     const id = uuidv4();
     const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
-    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef);
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, undefined, "sub");
 
     // Persist immediately
     this.persistSession(session).catch(() => {});
@@ -81,7 +133,10 @@ export class SessionManager {
       agent.replaceMessages(persisted.messages as any);
     }
 
-    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, persisted.createdAt);
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, persisted.createdAt, persisted.type ?? "sub", persisted.parentId);
+    if (persisted.type === "main") {
+      this.mainSessionId = id;
+    }
     return session;
   }
 
@@ -118,7 +173,7 @@ export class SessionManager {
 
     const shellExecTool = createShellExecTool(gate);
     const allTools = [...this.tools, shellExecTool];
-    const agent = createAgent(this.getConfig(), this.getRegistry(), allTools);
+    const agent = createAgent(this.getConfig(), this.getRegistry(), allTools, this.oauthStore);
 
     return { agent, gate, pendingApprovals, sessionRef };
   }
@@ -130,9 +185,13 @@ export class SessionManager {
     pendingApprovals: Map<string, { resolve: (d: ApprovalDecision) => void; command: string }>,
     sessionRef: { session: Session | null },
     createdAt?: number,
+    type: "main" | "sub" = "sub",
+    parentId?: string
   ): Session {
     const session: Session = {
       id,
+      type,
+      parentId,
       agent,
       eventBuffer: [],
       lastEventId: 0,
@@ -176,7 +235,31 @@ export class SessionManager {
 
     const persisted: PersistedSession = {
       id: session.id,
-      title: SessionStore.deriveTitle(messages),
+      type: session.type,
+      parentId: session.parentId,
+      title: SessionStore.deriveTitle(messages, session.type),
+      createdAt: session.createdAt,
+      updatedAt: Date.now(),
+      modelId: session.agent.state.model.id,
+      messages,
+    };
+
+    await this.store.save(persisted);
+  }
+
+  private async persistSubSession(session: Session, spawnedBy: "user" | "agent", taskPrompt?: string): Promise<void> {
+    const messages = session.agent.state.messages.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const persisted: PersistedSession = {
+      id: session.id,
+      type: "sub",
+      parentId: session.parentId,
+      spawnedBy,
+      taskPrompt,
+      title: SessionStore.deriveTitle(messages, "sub"),
       createdAt: session.createdAt,
       updatedAt: Date.now(),
       modelId: session.agent.state.model.id,
@@ -191,6 +274,8 @@ export class SessionManager {
   }
 
   delete(id: string): boolean {
+    // Protect main agent from deletion
+    if (id === this.mainSessionId) return false;
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.agent.state.isStreaming) {

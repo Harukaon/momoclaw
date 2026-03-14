@@ -1,9 +1,11 @@
 import type { Agent } from "@mariozechner/pi-agent-core";
 import { SelectList, type SlashCommand, type TUI } from "@mariozechner/pi-tui";
+import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import type { ChatView } from "../ui/chat.js";
 import type { InputView } from "../ui/input.js";
 import type { ModelRegistry } from "../../core/config.js";
 import type { SessionStore } from "../../core/session-store.js";
+import type { OAuthStore } from "../../core/oauth-store.js";
 import { SessionStore as SessionStoreClass } from "../../core/session-store.js";
 import { selectListTheme } from "../types.js";
 import { t, setLocale, getLocale, SUPPORTED_LOCALES } from "../../core/i18n/index.js";
@@ -16,6 +18,7 @@ export interface CommandContext {
   registry: ModelRegistry;
   tui: TUI;
   store: SessionStore;
+  oauthStore: OAuthStore;
   getCurrentSessionId: () => string;
   setCurrentSessionId: (id: string) => void;
   getSessionCreatedAt: () => number;
@@ -126,6 +129,8 @@ const commands: Command[] = [
                 currentMessages.length > 0
                   ? ctx.store.save({
                       id: ctx.getCurrentSessionId(),
+                      type: "sub",
+                      spawnedBy: "user",
                       title: SessionStoreClass.deriveTitle(currentMessages),
                       createdAt: ctx.getSessionCreatedAt(),
                       updatedAt: Date.now(),
@@ -210,13 +215,15 @@ const commands: Command[] = [
       if (ctx.agent.state.isStreaming) return;
 
       const summaries = await ctx.store.list();
-      if (summaries.length === 0) {
+      // Filter out main agent from deletable sessions
+      const deletable = summaries.filter((s) => s.type !== "main");
+      if (deletable.length === 0) {
         ctx.chatView.appendSystemMessage(t("cmd.no_history"));
         return;
       }
 
       ctx.inputView.showSelector((done) => {
-        const items = summaries.map((s) => ({
+        const items = deletable.map((s) => ({
           value: s.id,
           label: s.title,
           description: new Date(s.updatedAt).toLocaleString(),
@@ -234,6 +241,136 @@ const commands: Command[] = [
           ctx.store.delete(item.value).then((ok) => {
             if (ok) {
               ctx.chatView.appendSystemMessage(`${t("cmd.deleted")}: ${item.label}`);
+            }
+          });
+        };
+
+        list.onCancel = () => {
+          done();
+        };
+
+        return { component: list, focus: list };
+      });
+    },
+  },
+  {
+    name: "login",
+    description: () => t("cmd.login"),
+    execute: (_args, ctx) => {
+      if (ctx.agent.state.isStreaming) return;
+
+      const providers = getOAuthProviders();
+      if (providers.length === 0) {
+        ctx.chatView.appendSystemMessage(t("cmd.no_oauth_providers"));
+        return;
+      }
+
+      ctx.inputView.showSelector((done) => {
+        const items = providers.map((p) => ({
+          value: p.id,
+          label: p.name,
+          description: p.id,
+        }));
+
+        const list = new SelectList(items, 10, selectListTheme);
+
+        list.onSelect = (item) => {
+          done();
+          const provider = providers.find((p) => p.id === item.value);
+          if (!provider) return;
+
+          ctx.chatView.appendSystemMessage(`${t("cmd.login_select")}: ${provider.name}`);
+
+          // Create a promise for prompt resolution
+          let promptResolve: ((value: string) => void) | null = null;
+
+          provider
+            .login({
+              onAuth: (info) => {
+                ctx.chatView.appendSystemMessage(info.url);
+                if (info.instructions) {
+                  ctx.chatView.appendSystemMessage(info.instructions);
+                }
+              },
+              onPrompt: (prompt) => {
+                return new Promise<string>((resolve) => {
+                  promptResolve = resolve;
+                  ctx.chatView.appendSystemMessage(prompt.message);
+                  ctx.inputView.onSubmitOnce((text) => {
+                    if (promptResolve) {
+                      promptResolve(text);
+                      promptResolve = null;
+                    }
+                  });
+                });
+              },
+              onProgress: (msg) => {
+                ctx.chatView.appendSystemMessage(msg);
+              },
+              onManualCodeInput: () => {
+                return new Promise<string>((resolve) => {
+                  promptResolve = resolve;
+                  ctx.inputView.onSubmitOnce((text) => {
+                    if (promptResolve) {
+                      promptResolve(text);
+                      promptResolve = null;
+                    }
+                  });
+                });
+              },
+            })
+            .then(async (creds) => {
+              await ctx.oauthStore.save(provider.id, creds);
+              ctx.chatView.appendSystemMessage(`${t("cmd.login_success")}: ${provider.name}`);
+            })
+            .catch((err) => {
+              ctx.chatView.appendSystemMessage(
+                `${t("cmd.login_failed")}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+        };
+
+        list.onCancel = () => {
+          done();
+        };
+
+        return { component: list, focus: list };
+      });
+    },
+  },
+  {
+    name: "logout",
+    description: () => t("cmd.logout"),
+    execute: async (_args, ctx) => {
+      if (ctx.agent.state.isStreaming) return;
+
+      const allCreds = await ctx.oauthStore.loadAll();
+      const authenticatedIds = Object.keys(allCreds);
+
+      if (authenticatedIds.length === 0) {
+        ctx.chatView.appendSystemMessage(t("cmd.no_oauth_providers"));
+        return;
+      }
+
+      const providers = getOAuthProviders();
+
+      ctx.inputView.showSelector((done) => {
+        const items = authenticatedIds.map((id) => {
+          const provider = providers.find((p) => p.id === id);
+          return {
+            value: id,
+            label: provider?.name ?? id,
+            description: id,
+          };
+        });
+
+        const list = new SelectList(items, 10, selectListTheme);
+
+        list.onSelect = (item) => {
+          done();
+          ctx.oauthStore.delete(item.value).then((ok) => {
+            if (ok) {
+              ctx.chatView.appendSystemMessage(`${t("cmd.logout_success")}: ${item.label}`);
             }
           });
         };
