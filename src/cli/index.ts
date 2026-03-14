@@ -23,6 +23,7 @@ const terminal = new ProcessTerminal();
 const tui = new TUI(terminal);
 
 let currentSessionId = uuidv4();
+let sessionCreatedAt = Date.now();
 
 function shutdown(): void {
   tui.stop();
@@ -47,7 +48,7 @@ agent.subscribe((event) => {
       .save({
         id: currentSessionId,
         title: SessionStore.deriveTitle(messages),
-        createdAt: Date.now(),
+        createdAt: sessionCreatedAt,
         updatedAt: Date.now(),
         modelId: agent.state.model.id,
         messages,
@@ -66,6 +67,7 @@ const cmdCtx: CommandContext = {
   getCurrentSessionId: () => currentSessionId,
   setCurrentSessionId: (id: string) => {
     currentSessionId = id;
+    sessionCreatedAt = Date.now();
   },
 };
 

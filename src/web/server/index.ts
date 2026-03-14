@@ -21,7 +21,7 @@ setLocale(config.locale ?? "en");
 const store = new SessionStore(config.sessionsDir);
 await store.init();
 
-const manager = new SessionManager(config, registry, tools, store);
+const manager = new SessionManager(() => config, () => registry, tools, store);
 
 const app = Fastify({ logger: true });
 await app.register(cors);

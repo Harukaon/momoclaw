@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { FastifyPluginAsync } from "fastify";
 import type { Config } from "../../../core/config.js";
@@ -63,12 +64,28 @@ export function configRoutes(
         return { ok: false, errors };
       }
 
-      // Write to disk
-      writeFileSync(configPath, JSON.stringify(newConfig, null, 2), "utf-8");
+      // Write to disk (async, non-blocking)
+      await writeFile(configPath, JSON.stringify(newConfig, null, 2), "utf-8");
 
       // Hot-reload
       await onConfigSaved();
 
+      return { ok: true };
+    });
+
+    // PATCH /api/config/locale — update only the locale field (avoids API key corruption)
+    app.patch("/locale", async (req, reply) => {
+      const { locale } = req.body as { locale: string };
+      if (!locale || !["en", "zh-CN"].includes(locale)) {
+        reply.code(400);
+        return { ok: false, errors: ["locale must be 'en' or 'zh-CN'"] };
+      }
+
+      const raw = readFileSync(configPath, "utf-8");
+      const currentConfig = JSON.parse(raw);
+      currentConfig.locale = locale;
+      await writeFile(configPath, JSON.stringify(currentConfig, null, 2), "utf-8");
+      await onConfigSaved();
       return { ok: true };
     });
 

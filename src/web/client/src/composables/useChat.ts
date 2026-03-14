@@ -20,6 +20,7 @@ export interface SessionChatState {
   error: string | null;
   eventSource: EventSource | null;
   currentAssistantId: string | null;
+  lastEventId: number;
 }
 
 /** Per-session state store */
@@ -27,6 +28,9 @@ const sessionStates = reactive<Record<string, SessionChatState>>({});
 
 /** Currently viewed session ID */
 const activeSessionId = ref<string | null>(null);
+
+/** Optional callback when agent finishes (for refreshing session list etc.) */
+let onAgentEndCallback: ((sessionId: string) => void) | null = null;
 
 let messageCounter = 0;
 
@@ -43,6 +47,7 @@ function getOrCreate(sessionId: string): SessionChatState {
       error: null,
       eventSource: null,
       currentAssistantId: null,
+      lastEventId: 0,
     };
   }
   return sessionStates[sessionId];
@@ -54,15 +59,28 @@ function connectStream(sessionId: string) {
   // Already connected
   if (state.eventSource) return;
 
-  const es = new EventSource(`/api/sessions/${sessionId}/stream`);
+  // Pass lastEventId as query param so server can replay missed events
+  const url = state.lastEventId
+    ? `/api/sessions/${sessionId}/stream?lastEventId=${state.lastEventId}`
+    : `/api/sessions/${sessionId}/stream`;
+  const es = new EventSource(url);
   state.eventSource = es;
 
-  es.addEventListener("agent_start", () => {
+  // Track lastEventId from each SSE event for replay on reconnect
+  function trackId(e: MessageEvent) {
+    if (e.lastEventId) {
+      state.lastEventId = parseInt(e.lastEventId, 10) || state.lastEventId;
+    }
+  }
+
+  es.addEventListener("agent_start", (e: MessageEvent) => {
+    trackId(e);
     state.isStreaming = true;
     state.error = null;
   });
 
   es.addEventListener("message_start", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     if (data.role === "assistant") {
       const id = nextId();
@@ -77,6 +95,7 @@ function connectStream(sessionId: string) {
   });
 
   es.addEventListener("text_delta", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     if (state.currentAssistantId) {
       const msg = state.messages.find((m) => m.id === state.currentAssistantId);
@@ -87,6 +106,7 @@ function connectStream(sessionId: string) {
   });
 
   es.addEventListener("message_end", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     if (data.role === "assistant" && state.currentAssistantId) {
       const msg = state.messages.find((m) => m.id === state.currentAssistantId);
@@ -98,6 +118,7 @@ function connectStream(sessionId: string) {
   });
 
   es.addEventListener("tool_execution_start", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     state.toolExecutions.push({
       toolCallId: data.toolCallId,
@@ -107,6 +128,7 @@ function connectStream(sessionId: string) {
   });
 
   es.addEventListener("tool_execution_end", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     const exec = state.toolExecutions.find(
       (t) => t.toolCallId === data.toolCallId
@@ -117,6 +139,7 @@ function connectStream(sessionId: string) {
   });
 
   es.addEventListener("agent_end", (e: MessageEvent) => {
+    trackId(e);
     const data = JSON.parse(e.data);
     state.isStreaming = false;
     if (data.error) {
@@ -128,6 +151,8 @@ function connectStream(sessionId: string) {
     );
     // Disconnect SSE when agent finishes — will reconnect on next send
     disconnectSession(sessionId);
+    // Notify callback (e.g., to refresh session list)
+    if (onAgentEndCallback) onAgentEndCallback(sessionId);
   });
 
   es.onerror = () => {
@@ -247,6 +272,11 @@ export function useChat() {
     return sessionStates[sessionId]?.isStreaming ?? false;
   }
 
+  /** Register a callback for when any session's agent finishes */
+  function onAgentEnd(cb: (sessionId: string) => void) {
+    onAgentEndCallback = cb;
+  }
+
   // Computed properties that reflect the ACTIVE session's state
   const currentState = computed<SessionChatState | null>(() => {
     const sid = activeSessionId.value;
@@ -271,6 +301,7 @@ export function useChat() {
     clearSession,
     removeSession,
     disconnectAll,
+    onAgentEnd,
     sendMessage,
     abortStream,
     switchModel,

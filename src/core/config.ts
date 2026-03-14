@@ -94,10 +94,7 @@ async function fetchRemoteModels(provider: ProviderConfig): Promise<string[] | n
 function getStaticModels(providerName: string): string[] {
   try {
     const models = getModels(providerName as any);
-    if (Array.isArray(models)) {
-      return models.map((m: any) => m.id).sort();
-    }
-    return Object.keys(models).sort();
+    return models.map((m: any) => m.id).sort();
   } catch {
     return [];
   }

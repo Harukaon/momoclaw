@@ -68,10 +68,12 @@ export function validateConfig(config: unknown): {
 }
 
 export function maskApiKey(key: string): string {
-  if (!key || key.length < 8) return key ? "****" : "";
+  if (!key) return "";
+  if (key.length < 8) return "[MASKED]";
   return key.slice(0, 4) + "..." + key.slice(-4);
 }
 
 export function isApiKeyMasked(key: string): boolean {
+  if (key === "[MASKED]") return true;
   return /^.{4}\.\.\..{4}$/.test(key);
 }

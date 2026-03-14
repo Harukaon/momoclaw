@@ -23,26 +23,26 @@ export interface Session {
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
-  private config: Config;
-  private registry: ModelRegistry;
+  private getConfig: () => Config;
+  private getRegistry: () => ModelRegistry;
   private tools: AgentTool<any>[];
   private store: SessionStore;
 
   constructor(
-    config: Config,
-    registry: ModelRegistry,
+    getConfig: () => Config,
+    getRegistry: () => ModelRegistry,
     tools: AgentTool<any>[],
     store: SessionStore
   ) {
-    this.config = config;
-    this.registry = registry;
+    this.getConfig = getConfig;
+    this.getRegistry = getRegistry;
     this.tools = tools;
     this.store = store;
   }
 
   create(): Session {
     const id = uuidv4();
-    const agent = createAgent(this.config, this.registry, this.tools);
+    const agent = createAgent(this.getConfig(), this.getRegistry(), this.tools);
     const session = this.setupSession(id, agent);
 
     // Persist immediately
@@ -58,11 +58,11 @@ export class SessionManager {
     const persisted = await this.store.load(id);
     if (!persisted) return null;
 
-    const agent = createAgent(this.config, this.registry, this.tools);
+    const agent = createAgent(this.getConfig(), this.getRegistry(), this.tools);
 
     // Restore model if possible
     try {
-      const model = this.registry.resolve(persisted.modelId);
+      const model = this.getRegistry().resolve(persisted.modelId);
       agent.setModel(model);
     } catch {
       // keep default model
@@ -95,6 +95,10 @@ export class SessionManager {
       const sseEvent = this.mapAgentEvent(session, event);
       if (sseEvent) {
         session.eventBuffer.push(sseEvent);
+        // Cap buffer to prevent unbounded memory growth
+        if (session.eventBuffer.length > 5000) {
+          session.eventBuffer = session.eventBuffer.slice(-2500);
+        }
         for (const client of session.sseClients) {
           client(sseEvent);
         }
@@ -164,12 +168,12 @@ export class SessionManager {
   setModel(id: string, modelId: string): void {
     const session = this.sessions.get(id);
     if (!session) throw new Error("Session not found");
-    const model = this.registry.resolve(modelId);
+    const model = this.getRegistry().resolve(modelId);
     session.agent.setModel(model);
   }
 
   getModels(): string[] {
-    return this.registry.availableModels;
+    return this.getRegistry().availableModels;
   }
 
   getStore(): SessionStore {

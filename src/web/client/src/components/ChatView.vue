@@ -44,7 +44,11 @@ function scrollToBottom() {
 }
 
 watch(
-  () => props.messages.map((m) => m.content).join(""),
+  () => {
+    const len = props.messages.length;
+    const last = len > 0 ? props.messages[len - 1].content.length : 0;
+    return `${len}:${last}`;
+  },
   () => scrollToBottom()
 );
 

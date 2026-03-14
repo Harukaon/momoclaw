@@ -13,6 +13,6 @@ export function createAgent(config: Config, registry: ModelRegistry, agentTools:
       model,
       tools: agentTools,
     },
-    getApiKey: async () => provider.apiKey || undefined,
+    getApiKey: async (_providerName: string) => provider.apiKey || undefined,
   });
 }

@@ -529,6 +529,7 @@ async function fetchModels(providerName: string) {
 function save() {
   const config: any = {
     activeProvider: form.activeProvider,
+    defaultModel: props.config?.defaultModel ?? "",
     systemPrompt: form.systemPrompt,
     locale: form.locale,
     providers: JSON.parse(JSON.stringify(form.providers)),

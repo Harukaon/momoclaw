@@ -12,15 +12,12 @@ export function useLocale() {
   async function setLocale(newLocale: Locale): Promise<void> {
     setI18nLocale(newLocale);
 
-    // Persist to server
+    // Persist to server via dedicated locale endpoint (avoids touching API keys)
     try {
-      const res = await fetch("/api/config");
-      const config = await res.json();
-      config.locale = newLocale;
-      await fetch("/api/config", {
-        method: "PUT",
+      await fetch("/api/config/locale", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ locale: newLocale }),
       });
     } catch {
       // non-critical, locale is already set client-side

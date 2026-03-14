@@ -225,5 +225,10 @@ onMounted(async () => {
   await fetchModels();
   await initSession();
   await history.fetchSessions();
+
+  // Refresh session list when any agent finishes
+  chat.onAgentEnd(() => {
+    history.fetchSessions();
+  });
 });
 </script>

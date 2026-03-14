@@ -2,7 +2,7 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { TUI } from "@mariozechner/pi-tui";
 import type { Config, ModelRegistry } from "../core/config.js";
-import { getActiveProvider } from "../core/config.js";
+import { getActiveProvider, getActiveModel } from "../core/config.js";
 import type { ChatView } from "./ui/chat.js";
 import type { InputView } from "./ui/input.js";
 
@@ -14,7 +14,7 @@ export function createCliAgent(
   inputView: InputView,
   tui: TUI,
 ): Agent {
-  const model = registry.resolve(config.defaultModel);
+  const model = registry.resolve(getActiveModel(config));
   const provider = getActiveProvider(config);
 
   const agent = new Agent({
@@ -23,7 +23,7 @@ export function createCliAgent(
       model,
       tools: agentTools,
     },
-    getApiKey: async () => provider.apiKey || undefined,
+    getApiKey: async (_providerName: string) => provider.apiKey || undefined,
   });
 
   agent.subscribe((event) => {
