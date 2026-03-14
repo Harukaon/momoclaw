@@ -52,6 +52,11 @@ export function createCliAgent(
 
   agent.subscribe((event) => {
     switch (event.type) {
+      case "agent_start": {
+        inputView.showLoader();
+        break;
+      }
+
       case "message_start": {
         if (event.message.role === "assistant") {
           chatView.startAssistantMessage();
@@ -84,6 +89,7 @@ export function createCliAgent(
       }
 
       case "agent_end": {
+        inputView.hideLoader();
         if (agent.state.error) {
           chatView.showError(agent.state.error);
         }

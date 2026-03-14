@@ -85,6 +85,7 @@ const zhCN: Record<string, string> = {
   "cmd.logout_select": "选择要登出的服务商",
   "cmd.logout_success": "已登出",
   "cmd.no_oauth_providers": "没有可用的 OAuth 服务商",
+  "cmd.session_resumed": "已恢复主对话",
   "cmd.new": "归档记忆，开始新对话",
   "cmd.new_done": "开始新对话",
   "cmd.memory_archived": "记忆已归档",

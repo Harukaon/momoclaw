@@ -110,6 +110,7 @@ if (existingMain && existingMain.messages.length > 0) {
   } catch {
     // keep default model
   }
+  chatView.restoreMessages(existingMain.messages);
 }
 
 // Auto-save on agent_end — always save as main session

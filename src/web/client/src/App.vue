@@ -120,7 +120,7 @@ async function loadAndActivateSession(id: string): Promise<boolean> {
   currentModel.value = session.sessionModel.value;
 
   if (data.messages) {
-    chat.restoreMessages(id, data.messages, data.isStreaming);
+    chat.restoreMessages(id, data.messages, data.isStreaming, data.lastEventId);
   }
   return true;
 }

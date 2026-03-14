@@ -205,12 +205,17 @@ export function useChat() {
   function restoreMessages(
     sessionId: string,
     msgs: Array<{ role: string; content: any }>,
-    isStreaming?: boolean
+    isStreaming?: boolean,
+    lastEventId?: number
   ) {
     const state = getOrCreate(sessionId);
     state.timeline = [];
     state.currentAssistantId = null;
     state.isStreaming = isStreaming ?? false;
+    // Sync lastEventId from server so SSE reconnect skips already-known events
+    if (lastEventId != null) {
+      state.lastEventId = lastEventId;
+    }
 
     for (const m of msgs) {
       const role = m.role as "user" | "assistant" | "system";

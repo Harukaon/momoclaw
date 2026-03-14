@@ -55,6 +55,7 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
         parentId: session.parentId,
         createdAt: session.createdAt,
         isStreaming: session.agent.state.isStreaming,
+        lastEventId: session.lastEventId,
         model: session.agent.state.model.id,
         messages,
       };
@@ -98,6 +99,7 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
           parentId: session.parentId,
           createdAt: session.createdAt,
           isStreaming: session.agent.state.isStreaming,
+          lastEventId: session.lastEventId,
           model: session.agent.state.model.id,
           messages,
         };

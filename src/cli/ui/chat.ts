@@ -94,6 +94,35 @@ export class ChatView {
     this.tui.requestRender();
   }
 
+  /** Render persisted messages into the chat view (for session restore). */
+  restoreMessages(messages: Array<{ role: string; content: any }>): void {
+    for (const m of messages) {
+      // Extract text content
+      let text = "";
+      if (typeof m.content === "string") {
+        text = m.content;
+      } else if (Array.isArray(m.content)) {
+        text = m.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text)
+          .join("");
+      }
+      if (!text) continue;
+
+      if (m.role === "user") {
+        this.appendUserMessage(text);
+      } else if (m.role === "assistant") {
+        const label = new Text(colors.bold(colors.cyan(t("chat.assistant"))), 1, 0);
+        const body = new Markdown(text, 2, 0, markdownTheme);
+        const spacer = new Spacer(1);
+        this.container.addChild(label);
+        this.container.addChild(body);
+        this.container.addChild(spacer);
+      }
+    }
+    this.tui.requestRender();
+  }
+
   appendSystemMessage(text: string): void {
     const msg = new Text(colors.dim(text), 1, 0);
     const spacer = new Spacer(1);
