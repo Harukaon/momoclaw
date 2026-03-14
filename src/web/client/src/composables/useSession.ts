@@ -17,18 +17,22 @@ export function useSession() {
     }
   }
 
-  async function loadSession(id: string): Promise<boolean> {
+  async function loadSession(id: string): Promise<any | null> {
     loading.value = true;
     try {
       const res = await fetch(`/api/sessions/${id}`);
-      if (!res.ok) return false;
+      if (!res.ok) return null;
       const data = await res.json();
       sessionId.value = data.id;
       sessionModel.value = data.model;
-      return true;
+      return data;
     } finally {
       loading.value = false;
     }
+  }
+
+  function setSessionId(id: string) {
+    sessionId.value = id;
   }
 
   async function deleteSession(): Promise<void> {
@@ -43,6 +47,7 @@ export function useSession() {
     loading: computed(() => loading.value),
     createSession,
     loadSession,
+    setSessionId,
     deleteSession,
   };
 }

@@ -18,8 +18,8 @@ export function validateConfig(config: unknown): {
     errors.push("activeProvider is required and must be a string");
   }
 
-  if (typeof c.defaultModel !== "string" || !c.defaultModel) {
-    errors.push("defaultModel is required and must be a string");
+  if (c.defaultModel !== undefined && typeof c.defaultModel !== "string") {
+    errors.push("defaultModel must be a string if provided");
   }
 
   if (typeof c.systemPrompt !== "string") {
@@ -47,6 +47,9 @@ export function validateConfig(config: unknown): {
       }
       if (p.baseUrl !== undefined && typeof p.baseUrl !== "string") {
         errors.push(`providers.${name}.baseUrl must be a string`);
+      }
+      if (p.defaultModel !== undefined && typeof p.defaultModel !== "string") {
+        errors.push(`providers.${name}.defaultModel must be a string`);
       }
     }
 

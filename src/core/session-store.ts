@@ -104,10 +104,17 @@ export class SessionStore {
   static deriveTitle(messages: AgentMessage[]): string {
     const firstUser = messages.find((m) => m.role === "user");
     if (!firstUser) return "New conversation";
-    const content =
-      typeof firstUser.content === "string"
-        ? firstUser.content
-        : JSON.stringify(firstUser.content);
+    let content: string;
+    if (typeof firstUser.content === "string") {
+      content = firstUser.content;
+    } else if (Array.isArray(firstUser.content)) {
+      content = firstUser.content
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join("");
+    } else {
+      content = String(firstUser.content);
+    }
     const cleaned = content.replace(/\n/g, " ").trim();
     return cleaned.length > 60 ? cleaned.slice(0, 57) + "..." : cleaned;
   }

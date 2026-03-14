@@ -11,6 +11,7 @@ export interface ProviderConfig {
   api: ApiType;
   baseUrl?: string;
   apiKey: string;
+  defaultModel?: string;
 }
 
 export interface Config {
@@ -51,6 +52,12 @@ export function getActiveProvider(config: Config): ProviderConfig {
   return provider;
 }
 
+/** Resolve the default model: per-provider first, then global fallback */
+export function getActiveModel(config: Config): string {
+  const provider = config.providers[config.activeProvider];
+  return provider?.defaultModel || config.defaultModel;
+}
+
 // --- Model resolution ---
 
 interface ModelsResponse {
@@ -87,6 +94,9 @@ async function fetchRemoteModels(provider: ProviderConfig): Promise<string[] | n
 function getStaticModels(providerName: string): string[] {
   try {
     const models = getModels(providerName as any);
+    if (Array.isArray(models)) {
+      return models.map((m: any) => m.id).sort();
+    }
     return Object.keys(models).sort();
   } catch {
     return [];
@@ -132,7 +142,7 @@ export async function initModelRegistry(config: Config): Promise<ModelRegistry> 
   const staticModels = getStaticModels(providerName);
 
   return {
-    availableModels: staticModels.length > 0 ? staticModels : [config.defaultModel],
+    availableModels: staticModels.length > 0 ? staticModels : [getActiveModel(config)],
     source: "static",
     resolve: (modelId: string) => {
       try {
@@ -146,6 +156,25 @@ export async function initModelRegistry(config: Config): Promise<ModelRegistry> 
       }
     },
   };
+}
+
+/** Fetch available models for any configured provider (remote API or static) */
+export async function fetchModelsForProvider(
+  providerName: string,
+  provider: ProviderConfig
+): Promise<string[]> {
+  // 1) Try remote API
+  const remote = await fetchRemoteModels(provider);
+  if (remote && remote.length > 0) return remote;
+
+  // 2) Fallback to static registry
+  const staticList = getStaticModels(providerName);
+  if (staticList.length > 0) return staticList;
+
+  // 3) If provider has a defaultModel, return that
+  if (provider.defaultModel) return [provider.defaultModel];
+
+  return [];
 }
 
 // --- Known API types and providers from pi-ai ---

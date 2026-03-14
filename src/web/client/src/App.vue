@@ -4,6 +4,7 @@
     <Sidebar
       :sessions="history.sessions.value"
       :current-session-id="session.sessionId.value"
+      :streaming-sessions="streamingSessionIds"
       @new-chat="newSession"
       @switch-session="switchSession"
       @delete="onDeleteSession"
@@ -62,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import ChatView from "./components/ChatView.vue";
 import InputBox from "./components/InputBox.vue";
 import ModelSelect from "./components/ModelSelect.vue";
@@ -88,6 +89,17 @@ const currentModel = ref("");
 const showConfig = ref(false);
 const configEditorRef = ref<InstanceType<typeof ConfigEditor> | null>(null);
 
+/** IDs of sessions that are currently streaming (for sidebar indicators) */
+const streamingSessionIds = computed(() => {
+  const ids: string[] = [];
+  for (const s of history.sessions.value) {
+    if (chat.isSessionStreaming(s.id)) {
+      ids.push(s.id);
+    }
+  }
+  return ids;
+});
+
 async function fetchModels() {
   try {
     const res = await fetch("/api/models");
@@ -98,15 +110,24 @@ async function fetchModels() {
   }
 }
 
+async function loadAndActivateSession(id: string): Promise<boolean> {
+  const data = await session.loadSession(id);
+  if (!data) return false;
+
+  chat.setActiveSession(id);
+  currentModel.value = session.sessionModel.value;
+
+  if (data.messages) {
+    chat.restoreMessages(id, data.messages, data.isStreaming);
+  }
+  return true;
+}
+
 async function initSession() {
   const hash = window.location.hash.slice(1);
   if (hash) {
-    const ok = await session.loadSession(hash);
-    if (ok) {
-      currentModel.value = session.sessionModel.value;
-      chat.connectStream(hash);
-      return;
-    }
+    const ok = await loadAndActivateSession(hash);
+    if (ok) return;
   }
   await createNewSession();
 }
@@ -114,42 +135,41 @@ async function initSession() {
 async function createNewSession() {
   const id = await session.createSession();
   window.location.hash = id;
-  chat.clearMessages();
-  chat.connectStream(id);
+  chat.setActiveSession(id);
+  chat.clearSession(id);
   if (models.value.length > 0 && !currentModel.value) {
     currentModel.value = models.value[0];
   }
 }
 
 async function newSession() {
-  chat.disconnect();
   await createNewSession();
   history.fetchSessions();
 }
 
 async function switchSession(id: string) {
-  chat.disconnect();
-  chat.clearMessages();
+  // Don't reload if already active
+  if (session.sessionId.value === id) return;
 
-  const ok = await session.loadSession(id);
-  if (ok) {
+  // Check if we already have state for this session
+  const existing = chat.sessionStates[id];
+  if (existing && existing.messages.length > 0) {
+    // Already loaded — just switch view
+    session.setSessionId(id);
+    chat.setActiveSession(id);
     window.location.hash = id;
-    currentModel.value = session.sessionModel.value;
-
-    // Restore messages into chat state
-    const res = await fetch(`/api/sessions/${id}`);
-    const data = await res.json();
-    if (data.messages) {
-      chat.restoreMessages(data.messages);
-    }
-    chat.connectStream(id);
+    return;
   }
+
+  // Load from backend
+  await loadAndActivateSession(id);
+  window.location.hash = id;
 }
 
 async function onDeleteSession(id: string) {
   await history.deleteSession(id);
+  chat.removeSession(id);
   if (session.sessionId.value === id) {
-    chat.disconnect();
     await createNewSession();
   }
 }

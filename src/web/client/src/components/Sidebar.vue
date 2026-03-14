@@ -30,7 +30,8 @@
               @click.stop
             />
           </div>
-          <div v-else class="truncate text-gray-300" :title="s.title">
+          <div v-else class="truncate text-gray-300 flex items-center gap-1.5" :title="s.title">
+            <span v-if="streamingSessions?.includes(s.id)" class="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0"></span>
             {{ s.title }}
           </div>
           <div class="text-xs text-gray-500 mt-0.5">
@@ -72,6 +73,7 @@ const { t } = useLocale();
 defineProps<{
   sessions: SessionSummary[];
   currentSessionId: string | null;
+  streamingSessions?: string[];
 }>();
 
 const emit = defineEmits<{

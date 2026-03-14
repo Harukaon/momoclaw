@@ -7,7 +7,7 @@ import {
   maskApiKey,
   isApiKeyMasked,
 } from "../../../core/config-validator.js";
-import { KNOWN_API_TYPES, getKnownProviders } from "../../../core/config.js";
+import { KNOWN_API_TYPES, getKnownProviders, fetchModelsForProvider } from "../../../core/config.js";
 
 export function configRoutes(
   getConfig: () => Config,
@@ -70,6 +70,19 @@ export function configRoutes(
       await onConfigSaved();
 
       return { ok: true };
+    });
+
+    // GET /api/config/providers/:name/models — fetch models for a specific provider
+    app.get("/providers/:name/models", async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const config = getConfig();
+      const provider = config.providers[name];
+      if (!provider) {
+        reply.code(404);
+        return { error: `Provider "${name}" not found` };
+      }
+      const models = await fetchModelsForProvider(name, provider);
+      return { models };
     });
   };
 }

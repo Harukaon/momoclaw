@@ -1,4 +1,4 @@
-import { ref, computed, type Ref } from "vue";
+import { ref, computed, reactive, type Ref } from "vue";
 
 export interface ChatMessage {
   id: string;
@@ -13,117 +13,215 @@ export interface ToolExecution {
   status: "running" | "done" | "error";
 }
 
-const messages: Ref<ChatMessage[]> = ref([]);
-const toolExecutions: Ref<ToolExecution[]> = ref([]);
-const isStreaming = ref(false);
-const error = ref<string | null>(null);
+export interface SessionChatState {
+  messages: ChatMessage[];
+  toolExecutions: ToolExecution[];
+  isStreaming: boolean;
+  error: string | null;
+  eventSource: EventSource | null;
+  currentAssistantId: string | null;
+}
 
-let eventSource: EventSource | null = null;
-let currentAssistantId: string | null = null;
+/** Per-session state store */
+const sessionStates = reactive<Record<string, SessionChatState>>({});
+
+/** Currently viewed session ID */
+const activeSessionId = ref<string | null>(null);
+
 let messageCounter = 0;
 
 function nextId(): string {
   return `msg-${++messageCounter}`;
 }
 
-export function useChat() {
-  function connectStream(sessionId: string) {
-    if (eventSource) {
-      eventSource.close();
-    }
-
-    eventSource = new EventSource(`/api/sessions/${sessionId}/stream`);
-
-    eventSource.addEventListener("agent_start", () => {
-      isStreaming.value = true;
-      error.value = null;
-    });
-
-    eventSource.addEventListener("message_start", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      if (data.role === "assistant") {
-        const id = nextId();
-        currentAssistantId = id;
-        messages.value.push({
-          id,
-          role: "assistant",
-          content: "",
-          done: false,
-        });
-      }
-    });
-
-    eventSource.addEventListener("text_delta", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      if (currentAssistantId) {
-        const msg = messages.value.find((m) => m.id === currentAssistantId);
-        if (msg) {
-          msg.content += data.delta;
-        }
-      }
-    });
-
-    eventSource.addEventListener("message_end", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      if (data.role === "assistant" && currentAssistantId) {
-        const msg = messages.value.find((m) => m.id === currentAssistantId);
-        if (msg) {
-          msg.done = true;
-        }
-        currentAssistantId = null;
-      }
-    });
-
-    eventSource.addEventListener("tool_execution_start", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      toolExecutions.value.push({
-        toolCallId: data.toolCallId,
-        toolName: data.toolName,
-        status: "running",
-      });
-    });
-
-    eventSource.addEventListener("tool_execution_end", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      const exec = toolExecutions.value.find(
-        (t) => t.toolCallId === data.toolCallId
-      );
-      if (exec) {
-        exec.status = data.isError ? "error" : "done";
-      }
-    });
-
-    eventSource.addEventListener("agent_end", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      isStreaming.value = false;
-      if (data.error) {
-        error.value = data.error;
-      }
-      // Clean up completed tool executions
-      toolExecutions.value = toolExecutions.value.filter(
-        (t) => t.status === "running"
-      );
-    });
-
-    eventSource.onerror = () => {
-      // EventSource will auto-reconnect
+function getOrCreate(sessionId: string): SessionChatState {
+  if (!sessionStates[sessionId]) {
+    sessionStates[sessionId] = {
+      messages: [],
+      toolExecutions: [],
+      isStreaming: false,
+      error: null,
+      eventSource: null,
+      currentAssistantId: null,
     };
   }
+  return sessionStates[sessionId];
+}
 
-  function disconnect() {
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
+function connectStream(sessionId: string) {
+  const state = getOrCreate(sessionId);
+
+  // Already connected
+  if (state.eventSource) return;
+
+  const es = new EventSource(`/api/sessions/${sessionId}/stream`);
+  state.eventSource = es;
+
+  es.addEventListener("agent_start", () => {
+    state.isStreaming = true;
+    state.error = null;
+  });
+
+  es.addEventListener("message_start", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    if (data.role === "assistant") {
+      const id = nextId();
+      state.currentAssistantId = id;
+      state.messages.push({
+        id,
+        role: "assistant",
+        content: "",
+        done: false,
+      });
+    }
+  });
+
+  es.addEventListener("text_delta", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    if (state.currentAssistantId) {
+      const msg = state.messages.find((m) => m.id === state.currentAssistantId);
+      if (msg) {
+        msg.content += data.delta;
+      }
+    }
+  });
+
+  es.addEventListener("message_end", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    if (data.role === "assistant" && state.currentAssistantId) {
+      const msg = state.messages.find((m) => m.id === state.currentAssistantId);
+      if (msg) {
+        msg.done = true;
+      }
+      state.currentAssistantId = null;
+    }
+  });
+
+  es.addEventListener("tool_execution_start", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    state.toolExecutions.push({
+      toolCallId: data.toolCallId,
+      toolName: data.toolName,
+      status: "running",
+    });
+  });
+
+  es.addEventListener("tool_execution_end", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    const exec = state.toolExecutions.find(
+      (t) => t.toolCallId === data.toolCallId
+    );
+    if (exec) {
+      exec.status = data.isError ? "error" : "done";
+    }
+  });
+
+  es.addEventListener("agent_end", (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    state.isStreaming = false;
+    if (data.error) {
+      state.error = data.error;
+    }
+    // Clean up completed tool executions
+    state.toolExecutions = state.toolExecutions.filter(
+      (t) => t.status === "running"
+    );
+    // Disconnect SSE when agent finishes — will reconnect on next send
+    disconnectSession(sessionId);
+  });
+
+  es.onerror = () => {
+    // EventSource will auto-reconnect
+  };
+}
+
+function disconnectSession(sessionId: string) {
+  const state = sessionStates[sessionId];
+  if (!state?.eventSource) return;
+  state.eventSource.close();
+  state.eventSource = null;
+}
+
+export function useChat() {
+  /** Set which session the UI is currently viewing */
+  function setActiveSession(sessionId: string | null) {
+    activeSessionId.value = sessionId;
+  }
+
+  /** Restore messages from backend into a session's state */
+  function restoreMessages(
+    sessionId: string,
+    msgs: Array<{ role: string; content: any }>,
+    isStreaming?: boolean
+  ) {
+    const state = getOrCreate(sessionId);
+    state.messages = [];
+    state.toolExecutions = [];
+    state.currentAssistantId = null;
+    state.isStreaming = isStreaming ?? false;
+
+    for (const m of msgs) {
+      const role = m.role as "user" | "assistant" | "system";
+      let content: string;
+      if (typeof m.content === "string") {
+        content = m.content;
+      } else if (Array.isArray(m.content)) {
+        content = (m.content as any[])
+          .filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join("");
+      } else {
+        content = "";
+      }
+      state.messages.push({
+        id: nextId(),
+        role,
+        content,
+        done: true,
+      });
+    }
+
+    // If backend says it's still streaming, connect SSE to continue receiving
+    if (isStreaming) {
+      connectStream(sessionId);
+    }
+  }
+
+  /** Clear a session's state (or current active if no id given) */
+  function clearSession(sessionId: string) {
+    const state = getOrCreate(sessionId);
+    disconnectSession(sessionId);
+    state.messages = [];
+    state.toolExecutions = [];
+    state.currentAssistantId = null;
+    state.isStreaming = false;
+    state.error = null;
+  }
+
+  /** Remove a session from the state map entirely */
+  function removeSession(sessionId: string) {
+    disconnectSession(sessionId);
+    delete sessionStates[sessionId];
+  }
+
+  /** Disconnect all SSE connections */
+  function disconnectAll() {
+    for (const sid of Object.keys(sessionStates)) {
+      disconnectSession(sid);
     }
   }
 
   async function sendMessage(sessionId: string, message: string) {
-    messages.value.push({
+    const state = getOrCreate(sessionId);
+    state.messages.push({
       id: nextId(),
       role: "user",
       content: message,
       done: true,
     });
+
+    // Ensure SSE is connected before sending
+    connectStream(sessionId);
 
     await fetch(`/api/sessions/${sessionId}/messages`, {
       method: "POST",
@@ -144,49 +242,37 @@ export function useChat() {
     });
   }
 
-  function clearMessages() {
-    messages.value = [];
-    toolExecutions.value = [];
-    currentAssistantId = null;
+  /** Check if a specific session is streaming */
+  function isSessionStreaming(sessionId: string): boolean {
+    return sessionStates[sessionId]?.isStreaming ?? false;
   }
 
-  function restoreMessages(
-    msgs: Array<{ role: string; content: any }>
-  ) {
-    clearMessages();
-    for (const m of msgs) {
-      const role = m.role as "user" | "assistant" | "system";
-      let content: string;
-      if (typeof m.content === "string") {
-        content = m.content;
-      } else if (Array.isArray(m.content)) {
-        content = (m.content as any[])
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("");
-      } else {
-        content = "";
-      }
-      messages.value.push({
-        id: nextId(),
-        role,
-        content,
-        done: true,
-      });
-    }
-  }
+  // Computed properties that reflect the ACTIVE session's state
+  const currentState = computed<SessionChatState | null>(() => {
+    const sid = activeSessionId.value;
+    if (!sid) return null;
+    return sessionStates[sid] ?? null;
+  });
 
   return {
-    messages: computed(() => messages.value),
-    toolExecutions: computed(() => toolExecutions.value),
-    isStreaming: computed(() => isStreaming.value),
-    error: computed(() => error.value),
-    connectStream,
-    disconnect,
+    // Active session reactive state
+    messages: computed(() => currentState.value?.messages ?? []),
+    toolExecutions: computed(() => currentState.value?.toolExecutions ?? []),
+    isStreaming: computed(() => currentState.value?.isStreaming ?? false),
+    error: computed(() => currentState.value?.error ?? null),
+
+    // Per-session access (for sidebar indicators etc.)
+    sessionStates,
+    isSessionStreaming,
+
+    // Actions
+    setActiveSession,
+    restoreMessages,
+    clearSession,
+    removeSession,
+    disconnectAll,
     sendMessage,
     abortStream,
     switchModel,
-    clearMessages,
-    restoreMessages,
   };
 }
