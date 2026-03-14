@@ -105,7 +105,7 @@
           <div>
             <label class="block text-xs text-gray-400 mb-1">
               GitHub Token
-              <span class="text-gray-500 ml-1">(GITHUB_TOKEN)</span>
+              <span class="text-gray-500 ml-1">(COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN)</span>
             </label>
             <div class="flex gap-2">
               <input
@@ -133,6 +133,8 @@
             <code class="block">AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY</code>
             <p class="text-gray-500">{{ t('config.or') }}</p>
             <code class="block">AWS_BEARER_TOKEN_BEDROCK</code>
+            <p class="text-gray-500">{{ t('config.or') }}</p>
+            <code class="block">AWS_WEB_IDENTITY_TOKEN_FILE (IRSA)</code>
           </div>
           <div>
             <label class="block text-xs text-gray-400 mb-1">{{ t('config.aws_region') }}</label>
@@ -188,10 +190,10 @@
           <div class="bg-gray-800/50 rounded-lg p-3 text-xs text-gray-400 space-y-1">
             <p class="font-medium text-gray-300">{{ t('config.auth_env_vars') }}:</p>
             <code class="block">GOOGLE_APPLICATION_CREDENTIALS</code>
-            <p class="text-gray-500">gcloud auth application-default login</p>
+            <p class="text-gray-500">{{ t('config.or') }} gcloud auth application-default login</p>
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">{{ t('config.gcp_project') }}</label>
+            <label class="block text-xs text-gray-400 mb-1">{{ t('config.gcp_project') }} (GOOGLE_CLOUD_PROJECT)</label>
             <input
               v-model="form.providers[pName].project"
               class="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none border border-gray-600"
@@ -199,7 +201,7 @@
             />
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">{{ t('config.gcp_location') }}</label>
+            <label class="block text-xs text-gray-400 mb-1">{{ t('config.gcp_location') }} (GOOGLE_CLOUD_LOCATION)</label>
             <input
               v-model="form.providers[pName].location"
               class="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none border border-gray-600"
@@ -394,7 +396,7 @@ const providerAuthTypes: Record<string, AuthType> = {
 };
 
 const providerEnvVars: Record<string, string> = {
-  anthropic: "ANTHROPIC_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY / ANTHROPIC_OAUTH_TOKEN",
   openai: "OPENAI_API_KEY",
   google: "GEMINI_API_KEY",
   mistral: "MISTRAL_API_KEY",
@@ -410,11 +412,8 @@ const providerEnvVars: Record<string, string> = {
   "opencode-go": "OPENCODE_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
   "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
-  "github-copilot": "GITHUB_TOKEN",
+  "github-copilot": "COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN",
   "azure-openai-responses": "AZURE_OPENAI_API_KEY",
-  "google-gemini-cli": "GEMINI_API_KEY",
-  "google-antigravity": "GEMINI_API_KEY",
-  "openai-codex": "OPENAI_API_KEY",
 };
 
 // Default API type mapping for known providers
@@ -438,6 +437,10 @@ const providerApiDefaults: Record<string, string> = {
   huggingface: "openai-completions",
   minimax: "openai-completions",
   "minimax-cn": "openai-completions",
+  zai: "openai-completions",
+  opencode: "openai-completions",
+  "opencode-go": "openai-completions",
+  "kimi-coding": "openai-completions",
 };
 
 function getAuthType(providerName: string): AuthType {
