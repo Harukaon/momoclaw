@@ -6,7 +6,8 @@ import type { ModelRegistry } from "../../core/config.js";
 import type { SessionStore } from "../../core/session-store.js";
 import { SessionStore as SessionStoreClass } from "../../core/session-store.js";
 import { selectListTheme } from "../types.js";
-import { t } from "../../core/i18n/index.js";
+import { t, setLocale, getLocale, SUPPORTED_LOCALES } from "../../core/i18n/index.js";
+import type { Locale } from "../../core/i18n/index.js";
 
 export interface CommandContext {
   agent: Agent;
@@ -17,6 +18,7 @@ export interface CommandContext {
   store: SessionStore;
   getCurrentSessionId: () => string;
   setCurrentSessionId: (id: string) => void;
+  getSessionCreatedAt: () => number;
 }
 
 export interface Command {
@@ -125,7 +127,7 @@ const commands: Command[] = [
                   ? ctx.store.save({
                       id: ctx.getCurrentSessionId(),
                       title: SessionStoreClass.deriveTitle(currentMessages),
-                      createdAt: Date.now(),
+                      createdAt: ctx.getSessionCreatedAt(),
                       updatedAt: Date.now(),
                       modelId: ctx.agent.state.model.id,
                       messages: currentMessages,
@@ -138,6 +140,100 @@ const commands: Command[] = [
                 ctx.chatView.clear();
                 ctx.chatView.appendSystemMessage(`${t("cmd.session_loaded")}: ${persisted.title}`);
               });
+            }
+          });
+        };
+
+        list.onCancel = () => {
+          done();
+        };
+
+        return { component: list, focus: list };
+      });
+    },
+  },
+  {
+    name: "rename",
+    description: () => t("cmd.rename"),
+    execute: async (args, ctx) => {
+      const title = args.trim();
+      if (!title) {
+        ctx.chatView.appendSystemMessage(t("cmd.rename_usage"));
+        return;
+      }
+      const sessionId = ctx.getCurrentSessionId();
+      try {
+        await ctx.store.rename(sessionId, title);
+        ctx.chatView.appendSystemMessage(`${t("cmd.renamed")}: ${title}`);
+      } catch {
+        ctx.chatView.appendSystemMessage(t("cmd.rename_failed"));
+      }
+    },
+  },
+  {
+    name: "locale",
+    description: () => t("cmd.locale"),
+    execute: (_args, ctx) => {
+      const current = getLocale();
+
+      ctx.inputView.showSelector((done) => {
+        const items = SUPPORTED_LOCALES.map((loc) => ({
+          value: loc,
+          label: loc === "en" ? "English" : "中文",
+          description: loc === current ? "(current)" : undefined,
+        }));
+
+        const list = new SelectList(items, 5, selectListTheme);
+        const currentIdx = SUPPORTED_LOCALES.indexOf(current);
+        if (currentIdx >= 0) list.setSelectedIndex(currentIdx);
+
+        list.onSelect = (item) => {
+          done();
+          if (item.value !== current) {
+            setLocale(item.value as Locale);
+            ctx.chatView.appendSystemMessage(`${t("cmd.locale_switched")}: ${item.label}`);
+          }
+        };
+
+        list.onCancel = () => {
+          done();
+        };
+
+        return { component: list, focus: list };
+      });
+    },
+  },
+  {
+    name: "delete",
+    description: () => t("cmd.delete"),
+    execute: async (_args, ctx) => {
+      if (ctx.agent.state.isStreaming) return;
+
+      const summaries = await ctx.store.list();
+      if (summaries.length === 0) {
+        ctx.chatView.appendSystemMessage(t("cmd.no_history"));
+        return;
+      }
+
+      ctx.inputView.showSelector((done) => {
+        const items = summaries.map((s) => ({
+          value: s.id,
+          label: s.title,
+          description: new Date(s.updatedAt).toLocaleString(),
+        }));
+
+        const list = new SelectList(items, 10, selectListTheme);
+
+        list.onSelect = (item) => {
+          done();
+          // Don't allow deleting current session
+          if (item.value === ctx.getCurrentSessionId()) {
+            ctx.chatView.appendSystemMessage(t("cmd.delete_current"));
+            return;
+          }
+          ctx.store.delete(item.value).then((ok) => {
+            if (ok) {
+              ctx.chatView.appendSystemMessage(`${t("cmd.deleted")}: ${item.label}`);
             }
           });
         };

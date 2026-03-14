@@ -69,6 +69,7 @@ const cmdCtx: CommandContext = {
     currentSessionId = id;
     sessionCreatedAt = Date.now();
   },
+  getSessionCreatedAt: () => sessionCreatedAt,
 };
 
 inputView.onSubmit(async (text) => {
