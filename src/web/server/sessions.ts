@@ -86,7 +86,7 @@ export class SessionManager {
 
   createSubAgent(parentId?: string, taskPrompt?: string, spawnedBy: "user" | "agent" = "user"): Session {
     const id = uuidv4();
-    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
+    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate(spawnedBy === "agent");
     const resolvedParentId = parentId ?? this.mainSessionId ?? undefined;
     const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, undefined, "sub", resolvedParentId);
 
@@ -140,36 +140,39 @@ export class SessionManager {
     return session;
   }
 
-  private createAgentWithGate() {
+  private createAgentWithGate(autoApprove = false) {
     const pendingApprovals = new Map<string, { resolve: (d: ApprovalDecision) => void; command: string }>();
     const gate = createApprovalGate();
-
-    // We need a way to broadcast SSE events from the gate.
-    // The session ref is set after createAgentWithGate returns, so we use a mutable holder.
     const sessionRef: { session: Session | null } = { session: null };
 
-    gate.requestApproval = async (req) => {
-      return new Promise<ApprovalDecision>((resolve) => {
-        pendingApprovals.set(req.toolCallId, { resolve, command: req.command });
+    if (autoApprove) {
+      // Agent-spawned sub-agents auto-approve all commands
+      // because no SSE client will be connected to respond to approval requests
+      gate.requestApproval = async () => "allow" as ApprovalDecision;
+    } else {
+      gate.requestApproval = async (req) => {
+        return new Promise<ApprovalDecision>((resolve) => {
+          pendingApprovals.set(req.toolCallId, { resolve, command: req.command });
 
-        const session = sessionRef.session;
-        if (session) {
-          const sseEvent: AgentEvent = {
-            id: ++session.lastEventId,
-            type: "tool_approval_request",
-            data: {
-              toolCallId: req.toolCallId,
-              toolName: req.toolName,
-              command: req.command,
-            },
-          };
-          session.eventBuffer.push(sseEvent);
-          for (const client of session.sseClients) {
-            client(sseEvent);
+          const session = sessionRef.session;
+          if (session) {
+            const sseEvent: AgentEvent = {
+              id: ++session.lastEventId,
+              type: "tool_approval_request",
+              data: {
+                toolCallId: req.toolCallId,
+                toolName: req.toolName,
+                command: req.command,
+              },
+            };
+            session.eventBuffer.push(sseEvent);
+            for (const client of session.sseClients) {
+              client(sseEvent);
+            }
           }
-        }
-      });
-    };
+        });
+      };
+    }
 
     const shellExecTool = createShellExecTool(gate);
     const allTools = [...this.tools, shellExecTool];
