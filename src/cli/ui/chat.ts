@@ -82,6 +82,18 @@ export class ChatView {
     this.tui.requestRender();
   }
 
+  showApprovalRequest(command: string): void {
+    const label = new Text(
+      colors.bold(colors.yellow(`⚠ ${t("approval.prompt")}`)),
+      1,
+      0,
+    );
+    const cmd = new Text(colors.dim(`  $ ${command}`), 1, 0);
+    this.container.addChild(label);
+    this.container.addChild(cmd);
+    this.tui.requestRender();
+  }
+
   appendSystemMessage(text: string): void {
     const msg = new Text(colors.dim(text), 1, 0);
     const spacer = new Spacer(1);

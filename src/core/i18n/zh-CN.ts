@@ -42,6 +42,16 @@ const zhCN: Record<string, string> = {
   "tool.done": "完成",
   "tool.error": "错误",
 
+  // Approval
+  "approval.prompt": "命令需要批准：",
+  "approval.allow": "允许",
+  "approval.allow_once": "允许执行此命令",
+  "approval.always": "始终允许",
+  "approval.always_desc": "加入会话白名单",
+  "approval.deny": "拒绝",
+  "approval.denied": "命令已被用户拒绝",
+  "approval.timeout": "审批超时",
+
   // Commands
   "cmd.exit": "退出应用",
   "cmd.clear": "清空对话",

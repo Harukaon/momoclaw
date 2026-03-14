@@ -42,5 +42,31 @@ export function chatRoutes(manager: SessionManager): FastifyPluginAsync {
       }
       return { aborted };
     });
+
+    // Approve or deny a tool execution
+    app.post<{
+      Params: { id: string };
+      Body: { toolCallId: string; decision: "allow" | "deny" | "always" };
+    }>("/:id/tool-approve", async (req, reply) => {
+      const session = manager.get(req.params.id);
+      if (!session) {
+        reply.code(404);
+        return { error: "Session not found" };
+      }
+
+      const { toolCallId, decision } = req.body as any;
+      if (!toolCallId || !decision) {
+        reply.code(400);
+        return { error: "toolCallId and decision are required" };
+      }
+
+      if (!["allow", "deny", "always"].includes(decision)) {
+        reply.code(400);
+        return { error: "decision must be allow, deny, or always" };
+      }
+
+      const resolved = manager.resolveApproval(req.params.id, toolCallId, decision);
+      return { ok: resolved };
+    });
   };
 }

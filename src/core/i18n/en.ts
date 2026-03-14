@@ -42,6 +42,16 @@ const en: Record<string, string> = {
   "tool.done": "done",
   "tool.error": "error",
 
+  // Approval
+  "approval.prompt": "Command requires approval:",
+  "approval.allow": "Allow",
+  "approval.allow_once": "Allow this command once",
+  "approval.always": "Always Allow",
+  "approval.always_desc": "Add to session whitelist",
+  "approval.deny": "Deny",
+  "approval.denied": "Command denied by user",
+  "approval.timeout": "Approval timed out",
+
   // Commands
   "cmd.exit": "Exit the application",
   "cmd.clear": "Clear the conversation",

@@ -5,6 +5,12 @@ import type { Config, ModelRegistry } from "../../core/config.js";
 import { createAgent } from "../../core/create-agent.js";
 import { SessionStore } from "../../core/session-store.js";
 import type { PersistedSession } from "../../core/session-store.js";
+import {
+  createApprovalGate,
+  createShellExecTool,
+  type ApprovalGate,
+  type ApprovalDecision,
+} from "../../core/tools/index.js";
 
 export interface AgentEvent {
   id: number;
@@ -19,6 +25,8 @@ export interface Session {
   lastEventId: number;
   createdAt: number;
   sseClients: Set<(event: AgentEvent) => void>;
+  approvalGate: ApprovalGate;
+  pendingApprovals: Map<string, { resolve: (d: ApprovalDecision) => void; command: string }>;
 }
 
 export class SessionManager {
@@ -42,8 +50,8 @@ export class SessionManager {
 
   create(): Session {
     const id = uuidv4();
-    const agent = createAgent(this.getConfig(), this.getRegistry(), this.tools);
-    const session = this.setupSession(id, agent);
+    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef);
 
     // Persist immediately
     this.persistSession(session).catch(() => {});
@@ -58,7 +66,7 @@ export class SessionManager {
     const persisted = await this.store.load(id);
     if (!persisted) return null;
 
-    const agent = createAgent(this.getConfig(), this.getRegistry(), this.tools);
+    const { agent, gate, pendingApprovals, sessionRef } = this.createAgentWithGate();
 
     // Restore model if possible
     try {
@@ -73,14 +81,55 @@ export class SessionManager {
       agent.replaceMessages(persisted.messages as any);
     }
 
-    const session = this.setupSession(id, agent, persisted.createdAt);
+    const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, persisted.createdAt);
     return session;
+  }
+
+  private createAgentWithGate() {
+    const pendingApprovals = new Map<string, { resolve: (d: ApprovalDecision) => void; command: string }>();
+    const gate = createApprovalGate();
+
+    // We need a way to broadcast SSE events from the gate.
+    // The session ref is set after createAgentWithGate returns, so we use a mutable holder.
+    const sessionRef: { session: Session | null } = { session: null };
+
+    gate.requestApproval = async (req) => {
+      return new Promise<ApprovalDecision>((resolve) => {
+        pendingApprovals.set(req.toolCallId, { resolve, command: req.command });
+
+        const session = sessionRef.session;
+        if (session) {
+          const sseEvent: AgentEvent = {
+            id: ++session.lastEventId,
+            type: "tool_approval_request",
+            data: {
+              toolCallId: req.toolCallId,
+              toolName: req.toolName,
+              command: req.command,
+            },
+          };
+          session.eventBuffer.push(sseEvent);
+          for (const client of session.sseClients) {
+            client(sseEvent);
+          }
+        }
+      });
+    };
+
+    const shellExecTool = createShellExecTool(gate);
+    const allTools = [...this.tools, shellExecTool];
+    const agent = createAgent(this.getConfig(), this.getRegistry(), allTools);
+
+    return { agent, gate, pendingApprovals, sessionRef };
   }
 
   private setupSession(
     id: string,
     agent: Agent,
-    createdAt?: number
+    gate: ApprovalGate,
+    pendingApprovals: Map<string, { resolve: (d: ApprovalDecision) => void; command: string }>,
+    sessionRef: { session: Session | null },
+    createdAt?: number,
   ): Session {
     const session: Session = {
       id,
@@ -89,7 +138,12 @@ export class SessionManager {
       lastEventId: 0,
       createdAt: createdAt ?? Date.now(),
       sseClients: new Set(),
+      approvalGate: gate,
+      pendingApprovals,
     };
+
+    // Now that the session object exists, wire up the ref so the gate can emit SSE
+    sessionRef.session = session;
 
     agent.subscribe((event) => {
       const sseEvent = this.mapAgentEvent(session, event);
@@ -163,6 +217,16 @@ export class SessionManager {
       return true;
     }
     return false;
+  }
+
+  resolveApproval(sessionId: string, toolCallId: string, decision: ApprovalDecision): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const pending = session.pendingApprovals.get(toolCallId);
+    if (!pending) return false;
+    session.pendingApprovals.delete(toolCallId);
+    pending.resolve(decision);
+    return true;
   }
 
   setModel(id: string, modelId: string): void {

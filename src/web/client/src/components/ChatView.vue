@@ -10,7 +10,7 @@
       <ChatMessage :message="msg" />
     </template>
     <template v-for="exec in toolExecutions" :key="exec.toolCallId">
-      <ToolStatus :execution="exec" />
+      <ToolStatus :execution="exec" @approve="(id, d) => $emit('approve', id, d)" />
     </template>
     <div v-if="error" class="px-4 py-2 bg-red-900/30 text-red-300 rounded-lg text-sm">
       {{ t('error.prefix') }}: {{ error }}
@@ -31,6 +31,10 @@ const props = defineProps<{
   messages: ChatMessageType[];
   toolExecutions: ToolExecution[];
   error: string | null;
+}>();
+
+defineEmits<{
+  approve: [toolCallId: string, decision: "allow" | "deny" | "always"];
 }>();
 
 const scrollContainer = ref<HTMLElement | null>(null);

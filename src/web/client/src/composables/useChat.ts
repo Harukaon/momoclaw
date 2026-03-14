@@ -10,7 +10,8 @@ export interface ChatMessage {
 export interface ToolExecution {
   toolCallId: string;
   toolName: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "awaiting_approval";
+  command?: string;
 }
 
 export interface SessionChatState {
@@ -138,6 +139,18 @@ function connectStream(sessionId: string) {
     }
   });
 
+  es.addEventListener("tool_approval_request", (e: MessageEvent) => {
+    trackId(e);
+    const data = JSON.parse(e.data);
+    const exec = state.toolExecutions.find(
+      (t) => t.toolCallId === data.toolCallId
+    );
+    if (exec) {
+      exec.status = "awaiting_approval";
+      exec.command = data.command;
+    }
+  });
+
   es.addEventListener("agent_end", (e: MessageEvent) => {
     trackId(e);
     const data = JSON.parse(e.data);
@@ -259,6 +272,18 @@ export function useChat() {
     await fetch(`/api/sessions/${sessionId}/abort`, { method: "POST" });
   }
 
+  async function approveToolCall(
+    sessionId: string,
+    toolCallId: string,
+    decision: "allow" | "deny" | "always",
+  ) {
+    await fetch(`/api/sessions/${sessionId}/tool-approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolCallId, decision }),
+    });
+  }
+
   async function switchModel(sessionId: string, model: string) {
     await fetch(`/api/sessions/${sessionId}/model`, {
       method: "PUT",
@@ -304,6 +329,7 @@ export function useChat() {
     onAgentEnd,
     sendMessage,
     abortStream,
+    approveToolCall,
     switchModel,
   };
 }

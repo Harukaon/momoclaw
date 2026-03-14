@@ -1,10 +1,12 @@
-import { ProcessTerminal, TUI, matchesKey, Key } from "@mariozechner/pi-tui";
+import { ProcessTerminal, TUI, matchesKey, Key, SelectList } from "@mariozechner/pi-tui";
 import { loadConfig, initModelRegistry } from "../core/config.js";
-import { tools } from "../core/tools/index.js";
+import { tools, createShellExecTool, createApprovalGate } from "../core/tools/index.js";
+import type { ApprovalDecision } from "../core/tools/index.js";
 import { SessionStore } from "../core/session-store.js";
-import { setLocale } from "../core/i18n/index.js";
+import { setLocale, t } from "../core/i18n/index.js";
 import { handleCommand, getSlashCommands } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
+import { selectListTheme } from "./types.js";
 import { createApp } from "./ui/app.js";
 import { createCliAgent } from "./agent.js";
 import { v4 as uuidv4 } from "uuid";
@@ -35,7 +37,41 @@ process.on("SIGTERM", shutdown);
 
 const slashCommands = getSlashCommands();
 const { chatView, inputView } = createApp(tui, slashCommands);
-const agent = createCliAgent(config, registry, tools, chatView, inputView, tui);
+
+// --- Approval gate for shell_exec ---
+const approvalGate = createApprovalGate();
+approvalGate.requestApproval = async (req) => {
+  return new Promise<ApprovalDecision>((resolve) => {
+    chatView.showApprovalRequest(req.command);
+
+    inputView.showSelector((done) => {
+      const items = [
+        { value: "allow", label: t("approval.allow"), description: t("approval.allow_once") },
+        { value: "always", label: t("approval.always"), description: t("approval.always_desc") },
+        { value: "deny", label: t("approval.deny") },
+      ];
+
+      const list = new SelectList(items, 5, selectListTheme);
+
+      list.onSelect = (item) => {
+        done();
+        resolve(item.value as ApprovalDecision);
+      };
+
+      list.onCancel = () => {
+        done();
+        resolve("deny");
+      };
+
+      return { component: list, focus: list };
+    });
+  });
+};
+
+const shellExecTool = createShellExecTool(approvalGate);
+const allTools = [...tools, shellExecTool];
+
+const agent = createCliAgent(config, registry, allTools, chatView, inputView, tui);
 
 // Auto-save on agent_end
 agent.subscribe((event) => {

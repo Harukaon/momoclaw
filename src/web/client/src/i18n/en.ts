@@ -47,6 +47,17 @@ const en: Record<string, string> = {
   "tool.running": "Running",
   "tool.done": "done",
   "tool.error": "error",
+  "tool.awaiting_approval": "Awaiting approval",
+
+  // Approval
+  "approval.prompt": "Command requires approval:",
+  "approval.allow": "Allow",
+  "approval.allow_once": "Allow this command once",
+  "approval.always": "Always Allow",
+  "approval.always_desc": "Add to session whitelist",
+  "approval.deny": "Deny",
+  "approval.denied": "Command denied by user",
+  "approval.timeout": "Approval timed out",
   "error.prefix": "Error",
 };
 

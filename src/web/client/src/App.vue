@@ -50,6 +50,7 @@
           :messages="chat.messages.value"
           :tool-executions="chat.toolExecutions.value"
           :error="chat.error.value"
+          @approve="onApprove"
         />
         <InputBox
           :disabled="!session.sessionId.value || chat.isStreaming.value"
@@ -188,6 +189,12 @@ async function onAbort() {
   const sid = session.sessionId.value;
   if (!sid) return;
   await chat.abortStream(sid);
+}
+
+async function onApprove(toolCallId: string, decision: "allow" | "deny" | "always") {
+  const sid = session.sessionId.value;
+  if (!sid) return;
+  await chat.approveToolCall(sid, toolCallId, decision);
 }
 
 async function onModelChange(model: string) {
