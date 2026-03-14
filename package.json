@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx src/cli/index.ts",
-    "dev:web": "npx tsx src/web/server/index.ts & cd src/web/client && npx vite --port 5173 --open",
+    "dev:web": "pnpm exec tsx src/web/server/index.ts & cd src/web/client && pnpm exec vite --port 5173 --open",
     "build": "tsc",
     "start": "node dist/cli/index.js"
   },
@@ -19,6 +19,7 @@
     "@mariozechner/pi-ai": "^0.57.1",
     "@mariozechner/pi-tui": "^0.57.1",
     "fastify": "^5.8.2",
+    "my-assistant": "file:",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

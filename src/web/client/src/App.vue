@@ -7,6 +7,7 @@
       :current-session-id="session.sessionId.value"
       :streaming-sessions="streamingSessionIds"
       @new-chat="newSubAgent"
+      @new-main-chat="newMainChat"
       @switch-session="switchSession"
       @delete="onDeleteSession"
       @rename="onRenameSession"
@@ -48,8 +49,7 @@
       <!-- Chat area -->
       <template v-else>
         <ChatView
-          :messages="chat.messages.value"
-          :tool-executions="chat.toolExecutions.value"
+          :timeline="chat.timeline.value"
           :error="chat.error.value"
           @approve="onApprove"
         />
@@ -140,6 +140,27 @@ async function initSession() {
   window.location.hash = mainId;
 }
 
+async function newMainChat() {
+  try {
+    const res = await fetch("/api/sessions/main/new", { method: "POST" });
+    const data = await res.json();
+    if (!data.id) return;
+
+    // Clear old main session state
+    const oldMainId = session.mainSessionId.value;
+    if (oldMainId) {
+      chat.removeSession(oldMainId);
+    }
+
+    // Load and activate the new main session
+    await loadAndActivateSession(data.id);
+    window.location.hash = data.id;
+    await history.fetchSessions();
+  } catch {
+    // ignore
+  }
+}
+
 async function newSubAgent() {
   const id = await session.createSubAgent();
   window.location.hash = id;
@@ -157,7 +178,7 @@ async function switchSession(id: string) {
 
   // Check if we already have state for this session
   const existing = chat.sessionStates[id];
-  if (existing && existing.messages.length > 0) {
+  if (existing && existing.timeline.length > 0) {
     // Already loaded — just switch view
     session.setSessionId(id);
     chat.setActiveSession(id);

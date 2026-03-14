@@ -96,6 +96,52 @@ export class SessionManager {
     return session;
   }
 
+  /**
+   * Archive the current main session (save as "sub") and create a fresh main session.
+   * Returns the new main session.
+   */
+  async archiveAndResetMain(): Promise<Session> {
+    const oldMain = this.mainSessionId ? this.sessions.get(this.mainSessionId) : undefined;
+
+    if (oldMain) {
+      // Abort if streaming
+      if (oldMain.agent.state.isStreaming) {
+        oldMain.agent.abort();
+      }
+
+      const messages = oldMain.agent.state.messages;
+      if (messages.length > 0) {
+        // Re-save the old main as type "sub" so it appears in history
+        const cleaned = SessionManager.sanitizeMessages(messages);
+        const persisted = {
+          id: oldMain.id,
+          type: "sub" as const,
+          parentId: undefined,
+          spawnedBy: "user" as const,
+          title: SessionStore.deriveTitle(
+            cleaned.map((m: any) => ({ role: m.role, content: m.content })),
+            "sub"
+          ),
+          createdAt: oldMain.createdAt,
+          updatedAt: Date.now(),
+          modelId: oldMain.agent.state.model.id,
+          messages: cleaned.map((m: any) => ({ role: m.role, content: m.content })),
+        };
+        await this.store.save(persisted);
+      } else {
+        // No messages — just delete the old file
+        await this.store.delete(oldMain.id).catch(() => {});
+      }
+
+      // Remove from memory
+      this.sessions.delete(oldMain.id);
+    }
+
+    // Create a new main session
+    this.mainSessionId = null;
+    return this.getOrCreateMain();
+  }
+
   getMainSessionId(): string | null {
     return this.mainSessionId;
   }
@@ -128,9 +174,10 @@ export class SessionManager {
       // keep default model
     }
 
-    // Replay messages
+    // Replay messages (sanitize to clean up any broken history from past crashes/aborts)
     if (persisted.messages.length > 0) {
-      agent.replaceMessages(persisted.messages as any);
+      const cleaned = SessionManager.sanitizeMessages(persisted.messages);
+      agent.replaceMessages(cleaned as any);
     }
 
     const session = this.setupSession(id, agent, gate, pendingApprovals, sessionRef, persisted.createdAt, persisted.type ?? "sub", persisted.parentId);
@@ -231,7 +278,8 @@ export class SessionManager {
   }
 
   private async persistSession(session: Session): Promise<void> {
-    const messages = session.agent.state.messages.map((m: any) => ({
+    const cleaned = SessionManager.sanitizeMessages(session.agent.state.messages);
+    const messages = cleaned.map((m: any) => ({
       role: m.role,
       content: m.content,
     }));
@@ -251,7 +299,8 @@ export class SessionManager {
   }
 
   private async persistSubSession(session: Session, spawnedBy: "user" | "agent", taskPrompt?: string): Promise<void> {
-    const messages = session.agent.state.messages.map((m: any) => ({
+    const cleaned = SessionManager.sanitizeMessages(session.agent.state.messages);
+    const messages = cleaned.map((m: any) => ({
       role: m.role,
       content: m.content,
     }));
@@ -294,6 +343,15 @@ export class SessionManager {
     if (!session) throw new Error("Session not found");
     if (session.agent.state.isStreaming)
       throw new Error("Agent is already streaming");
+
+    // Sanitize message history before sending to API to avoid
+    // broken context from aborted/errored calls (empty assistant messages,
+    // thinking-only messages, orphaned toolResults)
+    const cleaned = SessionManager.sanitizeMessages(session.agent.state.messages);
+    if (cleaned.length !== session.agent.state.messages.length) {
+      session.agent.replaceMessages(cleaned as any);
+    }
+
     await session.agent.prompt(message);
   }
 
@@ -348,6 +406,77 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return [];
     return session.eventBuffer.filter((e) => e.id > lastEventId);
+  }
+
+  /**
+   * Remove broken messages from history that cause API errors.
+   *
+   * Handles: empty/thinking-only assistant messages, incomplete tool call
+   * chains (abort mid-execution), and consecutive user messages that result
+   * from removing broken entries.
+   *
+   * Tool association: assistant with N toolCalls is followed by exactly N
+   * toolResult messages (positional, no ID matching).
+   */
+  static sanitizeMessages(messages: any[]): any[] {
+    const result: any[] = [];
+    let i = 0;
+
+    while (i < messages.length) {
+      const m = messages[i];
+
+      if (m.role === "assistant") {
+        const hasText = Array.isArray(m.content)
+          ? m.content.some((b: any) => b.type === "text" && b.text?.trim())
+          : typeof m.content === "string" && m.content.trim();
+        const toolCallCount = Array.isArray(m.content)
+          ? m.content.filter((b: any) => b.type === "toolCall" || b.type === "tool_use").length
+          : 0;
+
+        // Skip empty assistant messages (no text, no tool calls)
+        if (!hasText && toolCallCount === 0) {
+          i++;
+          continue;
+        }
+
+        if (toolCallCount > 0) {
+          // Count how many toolResults actually follow
+          let resultCount = 0;
+          for (let j = i + 1; j < messages.length && messages[j].role === "toolResult"; j++) {
+            resultCount++;
+          }
+
+          if (resultCount < toolCallCount) {
+            // Incomplete tool chain (e.g. abort mid-execution)
+            // Skip this assistant + however many toolResults exist
+            i += 1 + resultCount;
+            continue;
+          }
+
+          // Complete chain — keep assistant + its toolResults
+          result.push(m);
+          i++;
+          for (let n = 0; n < toolCallCount; n++) {
+            result.push(messages[i]);
+            i++;
+          }
+          continue;
+        }
+
+        // Text-only assistant message
+        result.push(m);
+        i++;
+      } else if (m.role === "toolResult") {
+        // Orphaned toolResult (no preceding assistant with toolCall) — skip
+        i++;
+      } else {
+        // user / system
+        result.push(m);
+        i++;
+      }
+    }
+
+    return result;
   }
 
   private mapAgentEvent(session: Session, event: any): AgentEvent | null {

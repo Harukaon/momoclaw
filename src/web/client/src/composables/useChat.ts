@@ -1,6 +1,7 @@
-import { ref, computed, reactive, type Ref } from "vue";
+import { ref, computed, reactive } from "vue";
 
 export interface ChatMessage {
+  type: "message";
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
@@ -8,15 +9,17 @@ export interface ChatMessage {
 }
 
 export interface ToolExecution {
+  type: "tool";
   toolCallId: string;
   toolName: string;
   status: "running" | "done" | "error" | "awaiting_approval";
   command?: string;
 }
 
+export type TimelineItem = ChatMessage | ToolExecution;
+
 export interface SessionChatState {
-  messages: ChatMessage[];
-  toolExecutions: ToolExecution[];
+  timeline: TimelineItem[];
   isStreaming: boolean;
   error: string | null;
   eventSource: EventSource | null;
@@ -42,8 +45,7 @@ function nextId(): string {
 function getOrCreate(sessionId: string): SessionChatState {
   if (!sessionStates[sessionId]) {
     sessionStates[sessionId] = {
-      messages: [],
-      toolExecutions: [],
+      timeline: [],
       isStreaming: false,
       error: null,
       eventSource: null,
@@ -86,20 +88,25 @@ function connectStream(sessionId: string) {
     if (data.role === "assistant") {
       const id = nextId();
       state.currentAssistantId = id;
-      state.messages.push({
+      state.timeline.push({
+        type: "message",
         id,
         role: "assistant",
         content: "",
         done: false,
       });
     }
+    // Ignore toolResult role — tool results are tracked via tool_execution events
   });
 
   es.addEventListener("text_delta", (e: MessageEvent) => {
     trackId(e);
     const data = JSON.parse(e.data);
     if (state.currentAssistantId) {
-      const msg = state.messages.find((m) => m.id === state.currentAssistantId);
+      const msg = state.timeline.find(
+        (item): item is ChatMessage =>
+          item.type === "message" && item.id === state.currentAssistantId
+      );
       if (msg) {
         msg.content += data.delta;
       }
@@ -110,7 +117,10 @@ function connectStream(sessionId: string) {
     trackId(e);
     const data = JSON.parse(e.data);
     if (data.role === "assistant" && state.currentAssistantId) {
-      const msg = state.messages.find((m) => m.id === state.currentAssistantId);
+      const msg = state.timeline.find(
+        (item): item is ChatMessage =>
+          item.type === "message" && item.id === state.currentAssistantId
+      );
       if (msg) {
         msg.done = true;
       }
@@ -121,7 +131,13 @@ function connectStream(sessionId: string) {
   es.addEventListener("tool_execution_start", (e: MessageEvent) => {
     trackId(e);
     const data = JSON.parse(e.data);
-    state.toolExecutions.push({
+    // Dedup: skip if this toolCallId already exists (SSE reconnect replay)
+    const exists = state.timeline.some(
+      (item) => item.type === "tool" && item.toolCallId === data.toolCallId
+    );
+    if (exists) return;
+    state.timeline.push({
+      type: "tool",
       toolCallId: data.toolCallId,
       toolName: data.toolName,
       status: "running",
@@ -131,8 +147,9 @@ function connectStream(sessionId: string) {
   es.addEventListener("tool_execution_end", (e: MessageEvent) => {
     trackId(e);
     const data = JSON.parse(e.data);
-    const exec = state.toolExecutions.find(
-      (t) => t.toolCallId === data.toolCallId
+    const exec = state.timeline.find(
+      (item): item is ToolExecution =>
+        item.type === "tool" && item.toolCallId === data.toolCallId
     );
     if (exec) {
       exec.status = data.isError ? "error" : "done";
@@ -142,8 +159,9 @@ function connectStream(sessionId: string) {
   es.addEventListener("tool_approval_request", (e: MessageEvent) => {
     trackId(e);
     const data = JSON.parse(e.data);
-    const exec = state.toolExecutions.find(
-      (t) => t.toolCallId === data.toolCallId
+    const exec = state.timeline.find(
+      (item): item is ToolExecution =>
+        item.type === "tool" && item.toolCallId === data.toolCallId
     );
     if (exec) {
       exec.status = "awaiting_approval";
@@ -158,10 +176,7 @@ function connectStream(sessionId: string) {
     if (data.error) {
       state.error = data.error;
     }
-    // Clean up completed tool executions
-    state.toolExecutions = state.toolExecutions.filter(
-      (t) => t.status === "running"
-    );
+    // Do NOT clean up tool executions — keep done/error/awaiting_approval visible
     // Disconnect SSE when agent finishes — will reconnect on next send
     disconnectSession(sessionId);
     // Notify callback (e.g., to refresh session list)
@@ -193,30 +208,56 @@ export function useChat() {
     isStreaming?: boolean
   ) {
     const state = getOrCreate(sessionId);
-    state.messages = [];
-    state.toolExecutions = [];
+    state.timeline = [];
     state.currentAssistantId = null;
     state.isStreaming = isStreaming ?? false;
 
     for (const m of msgs) {
       const role = m.role as "user" | "assistant" | "system";
-      let content: string;
+
+      // Skip toolResult messages — tools are tracked separately
+      if (m.role === "toolResult") continue;
+
+      let textContent = "";
+      const toolCalls: Array<{ id: string; name: string }> = [];
+
       if (typeof m.content === "string") {
-        content = m.content;
+        textContent = m.content;
       } else if (Array.isArray(m.content)) {
-        content = (m.content as any[])
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("");
-      } else {
-        content = "";
+        for (const block of m.content as any[]) {
+          if (block.type === "text") {
+            textContent += block.text;
+          } else if (block.type === "tool_use" || block.type === "toolCall") {
+            toolCalls.push({ id: block.id, name: block.name });
+          }
+        }
       }
-      state.messages.push({
-        id: nextId(),
-        role,
-        content,
-        done: true,
-      });
+
+      // Skip empty assistant messages (e.g. only had thinking + toolCall, no text)
+      if (role === "assistant" && !textContent && toolCalls.length === 0) continue;
+
+      // Push the message only if it has text content
+      if (textContent) {
+        state.timeline.push({
+          type: "message",
+          id: nextId(),
+          role,
+          content: textContent,
+          done: true,
+        });
+      }
+
+      // For assistant messages, insert tool executions after the message
+      if (role === "assistant") {
+        for (const tc of toolCalls) {
+          state.timeline.push({
+            type: "tool",
+            toolCallId: tc.id,
+            toolName: tc.name,
+            status: "done",
+          });
+        }
+      }
     }
 
     // If backend says it's still streaming, connect SSE to continue receiving
@@ -229,8 +270,7 @@ export function useChat() {
   function clearSession(sessionId: string) {
     const state = getOrCreate(sessionId);
     disconnectSession(sessionId);
-    state.messages = [];
-    state.toolExecutions = [];
+    state.timeline = [];
     state.currentAssistantId = null;
     state.isStreaming = false;
     state.error = null;
@@ -251,7 +291,8 @@ export function useChat() {
 
   async function sendMessage(sessionId: string, message: string) {
     const state = getOrCreate(sessionId);
-    state.messages.push({
+    state.timeline.push({
+      type: "message",
       id: nextId(),
       role: "user",
       content: message,
@@ -261,11 +302,25 @@ export function useChat() {
     // Ensure SSE is connected before sending
     connectStream(sessionId);
 
-    await fetch(`/api/sessions/${sessionId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
-    });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // If agent is already streaming, sync our state
+        if (data.error?.includes("already streaming")) {
+          state.isStreaming = true;
+          connectStream(sessionId);
+        }
+        state.error = data.error || `Send failed (${res.status})`;
+      }
+    } catch {
+      state.error = "Network error";
+    }
   }
 
   async function abortStream(sessionId: string) {
@@ -310,9 +365,21 @@ export function useChat() {
   });
 
   return {
-    // Active session reactive state
-    messages: computed(() => currentState.value?.messages ?? []),
-    toolExecutions: computed(() => currentState.value?.toolExecutions ?? []),
+    // Active session reactive state — unified timeline
+    timeline: computed(() => currentState.value?.timeline ?? []),
+
+    // Backward-compatible filtered views
+    messages: computed(() =>
+      (currentState.value?.timeline ?? []).filter(
+        (item): item is ChatMessage => item.type === "message"
+      )
+    ),
+    toolExecutions: computed(() =>
+      (currentState.value?.timeline ?? []).filter(
+        (item): item is ToolExecution => item.type === "tool"
+      )
+    ),
+
     isStreaming: computed(() => currentState.value?.isStreaming ?? false),
     error: computed(() => currentState.value?.error ?? null),
 

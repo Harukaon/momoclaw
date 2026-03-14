@@ -42,6 +42,15 @@
         </div>
         <div class="hidden group-hover:flex items-center gap-1" @click.stop>
           <button
+            class="p-1 text-gray-500 hover:text-blue-400 transition-colors"
+            :title="t('sidebar.new_main_chat')"
+            @click="$emit('newMainChat')"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+          <button
             class="p-1 text-gray-500 hover:text-gray-300 transition-colors"
             :title="t('history.rename')"
             @click="startRename(mainSession)"
@@ -123,6 +132,7 @@ defineProps<{
 
 const emit = defineEmits<{
   newChat: [];
+  newMainChat: [];
   switchSession: [id: string];
   delete: [id: string];
   rename: [id: string, title: string];

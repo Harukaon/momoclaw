@@ -69,6 +69,7 @@ const en: Record<string, string> = {
   "sidebar.sub_agents": "Sub-Agents",
   "sidebar.new_sub_agent": "New Sub-Agent",
   "sidebar.cannot_delete_main": "Cannot delete main agent",
+  "sidebar.new_main_chat": "New Chat",
   "error.prefix": "Error",
 };
 

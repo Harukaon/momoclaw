@@ -25,8 +25,8 @@ export function chatRoutes(manager: SessionManager): FastifyPluginAsync {
         }
 
         // Fire-and-forget: prompt runs in background, events flow via SSE
-        manager.prompt(req.params.id, message).catch(() => {
-          // errors are delivered via agent_end event
+        manager.prompt(req.params.id, message).catch((err) => {
+          console.error("[prompt error]", req.params.id, err);
         });
 
         return { ok: true };

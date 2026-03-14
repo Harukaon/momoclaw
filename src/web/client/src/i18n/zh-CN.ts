@@ -69,6 +69,7 @@ const zhCN: Record<string, string> = {
   "sidebar.sub_agents": "子代理",
   "sidebar.new_sub_agent": "新建子代理",
   "sidebar.cannot_delete_main": "不能删除主代理",
+  "sidebar.new_main_chat": "新对话",
   "error.prefix": "错误",
 };
 

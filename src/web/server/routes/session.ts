@@ -15,6 +15,12 @@ export function sessionRoutes(manager: SessionManager): FastifyPluginAsync {
       return { id: session.id, createdAt: session.createdAt, type: session.type };
     });
 
+    // Archive main session and start fresh
+    app.post("/main/new", async (_req, reply) => {
+      const session = await manager.archiveAndResetMain();
+      return { id: session.id, createdAt: session.createdAt, type: session.type };
+    });
+
     // Create sub-agent
     app.post<{ Body: { parentId?: string; taskPrompt?: string } }>(
       "/sub",

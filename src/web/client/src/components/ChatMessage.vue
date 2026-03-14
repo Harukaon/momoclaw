@@ -12,15 +12,28 @@
     >
       {{ message.content }}
     </div>
-    <div
-      v-else
-      class="markdown-body break-words"
-      v-html="renderedContent"
-    ></div>
-    <div
-      v-if="!message.done && message.role === 'assistant'"
-      class="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5"
-    ></div>
+    <template v-else>
+      <!-- Assistant still loading (no content yet) -->
+      <div
+        v-if="!message.done && !message.content"
+        class="flex items-center gap-1.5 py-1"
+      >
+        <span class="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+        <span class="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+        <span class="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+      </div>
+      <!-- Assistant has content -->
+      <template v-else>
+        <div
+          class="markdown-body break-words"
+          v-html="renderedContent"
+        ></div>
+        <div
+          v-if="!message.done"
+          class="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5"
+        ></div>
+      </template>
+    </template>
   </div>
 </template>
 

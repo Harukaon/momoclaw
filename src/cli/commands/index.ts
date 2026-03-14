@@ -1,6 +1,7 @@
 import type { Agent } from "@mariozechner/pi-agent-core";
 import { SelectList, type SlashCommand, type TUI } from "@mariozechner/pi-tui";
 import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
+import { randomUUID } from "node:crypto";
 import type { ChatView } from "../ui/chat.js";
 import type { InputView } from "../ui/input.js";
 import type { ModelRegistry } from "../../core/config.js";
@@ -31,6 +32,37 @@ export interface Command {
 }
 
 const commands: Command[] = [
+  {
+    name: "new",
+    description: () => t("cmd.new"),
+    execute: async (_args, ctx) => {
+      if (ctx.agent.state.isStreaming) return;
+
+      // Save current session if it has messages
+      const currentMessages = ctx.agent.state.messages.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      if (currentMessages.length > 0) {
+        await ctx.store.save({
+          id: ctx.getCurrentSessionId(),
+          type: "sub",
+          spawnedBy: "user",
+          title: SessionStoreClass.deriveTitle(currentMessages),
+          createdAt: ctx.getSessionCreatedAt(),
+          updatedAt: Date.now(),
+          modelId: ctx.agent.state.model.id,
+          messages: currentMessages,
+        });
+      }
+
+      // Clear agent and start fresh
+      ctx.agent.clearMessages();
+      ctx.chatView.clear();
+      ctx.setCurrentSessionId(randomUUID());
+      ctx.chatView.appendSystemMessage(t("cmd.new_done"));
+    },
+  },
   {
     name: "exit",
     description: () => t("cmd.exit"),
