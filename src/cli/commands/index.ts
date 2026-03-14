@@ -2,6 +2,9 @@ import type { Agent } from "@mariozechner/pi-agent-core";
 import { SelectList, type SlashCommand, type TUI } from "@mariozechner/pi-tui";
 import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { ChatView } from "../ui/chat.js";
 import type { InputView } from "../ui/input.js";
 import type { ModelRegistry } from "../../core/config.js";
@@ -11,6 +14,18 @@ import { SessionStore as SessionStoreClass } from "../../core/session-store.js";
 import { selectListTheme } from "../types.js";
 import { t, setLocale, getLocale, SUPPORTED_LOCALES } from "../../core/i18n/index.js";
 import type { Locale } from "../../core/i18n/index.js";
+
+async function archiveMemory(messages: { role: string; content: any }[], modelId: string): Promise<string> {
+  const dir = join(homedir(), ".my-assistant", "memories");
+  await mkdir(dir, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const title = SessionStoreClass.deriveTitle(messages);
+  const slug = title.slice(0, 40).replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, "_").replace(/_+$/, "");
+  const filename = `${ts}_${slug}.json`;
+  const data = JSON.stringify({ archivedAt: Date.now(), modelId, title, messages }, null, 2);
+  await writeFile(join(dir, filename), data, "utf-8");
+  return filename;
+}
 
 export interface CommandContext {
   agent: Agent;
@@ -38,28 +53,19 @@ const commands: Command[] = [
     execute: async (_args, ctx) => {
       if (ctx.agent.state.isStreaming) return;
 
-      // Save current session if it has messages
+      // Archive current conversation as a memory file
       const currentMessages = ctx.agent.state.messages.map((m: any) => ({
         role: m.role,
         content: m.content,
       }));
       if (currentMessages.length > 0) {
-        await ctx.store.save({
-          id: ctx.getCurrentSessionId(),
-          type: "sub",
-          spawnedBy: "user",
-          title: SessionStoreClass.deriveTitle(currentMessages),
-          createdAt: ctx.getSessionCreatedAt(),
-          updatedAt: Date.now(),
-          modelId: ctx.agent.state.model.id,
-          messages: currentMessages,
-        });
+        const filename = await archiveMemory(currentMessages, ctx.agent.state.model.id);
+        ctx.chatView.appendSystemMessage(`${t("cmd.memory_archived")}: ${filename}`);
       }
 
-      // Clear agent and start fresh
+      // Clear agent messages, stay in main session
       ctx.agent.clearMessages();
       ctx.chatView.clear();
-      ctx.setCurrentSessionId(randomUUID());
       ctx.chatView.appendSystemMessage(t("cmd.new_done"));
     },
   },
@@ -152,28 +158,18 @@ const commands: Command[] = [
           done();
           ctx.store.load(item.value).then((persisted) => {
             if (persisted) {
-              // Save current session first
+              // Archive current messages as memory before switching
               const currentMessages = ctx.agent.state.messages.map((m: any) => ({
                 role: m.role,
                 content: m.content,
               }));
-              const savePromise =
+              const archivePromise =
                 currentMessages.length > 0
-                  ? ctx.store.save({
-                      id: ctx.getCurrentSessionId(),
-                      type: "sub",
-                      spawnedBy: "user",
-                      title: SessionStoreClass.deriveTitle(currentMessages),
-                      createdAt: ctx.getSessionCreatedAt(),
-                      updatedAt: Date.now(),
-                      modelId: ctx.agent.state.model.id,
-                      messages: currentMessages,
-                    })
-                  : Promise.resolve();
+                  ? archiveMemory(currentMessages, ctx.agent.state.model.id)
+                  : Promise.resolve(null);
 
-              savePromise.then(() => {
+              archivePromise.then(() => {
                 ctx.agent.replaceMessages(persisted.messages as any);
-                ctx.setCurrentSessionId(persisted.id);
                 ctx.chatView.clear();
                 ctx.chatView.appendSystemMessage(`${t("cmd.session_loaded")}: ${persisted.title}`);
               });

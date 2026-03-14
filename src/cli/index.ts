@@ -31,8 +31,28 @@ await oauthStore.init();
 const terminal = new ProcessTerminal();
 const tui = new TUI(terminal);
 
-let currentSessionId = uuidv4();
-let sessionCreatedAt = Date.now();
+// Find or create the main session
+const existingMain = await store.findMain();
+let currentSessionId: string;
+let sessionCreatedAt: number;
+
+if (existingMain) {
+  currentSessionId = existingMain.id;
+  sessionCreatedAt = existingMain.createdAt;
+} else {
+  currentSessionId = uuidv4();
+  sessionCreatedAt = Date.now();
+  // Persist the new main session immediately
+  await store.save({
+    id: currentSessionId,
+    type: "main",
+    title: SessionStore.deriveTitle([], "main"),
+    createdAt: sessionCreatedAt,
+    updatedAt: Date.now(),
+    modelId: "default",
+    messages: [],
+  });
+}
 
 function shutdown(): void {
   tui.stop();
@@ -80,7 +100,19 @@ const allTools = [...tools, shellExecTool];
 
 const agent = createCliAgent(config, registry, allTools, chatView, inputView, tui, oauthStore);
 
-// Auto-save on agent_end
+// Restore main session messages if resuming
+if (existingMain && existingMain.messages.length > 0) {
+  agent.replaceMessages(existingMain.messages as any);
+  // Restore model if possible
+  try {
+    const model = registry.resolve(existingMain.modelId);
+    agent.setModel(model);
+  } catch {
+    // keep default model
+  }
+}
+
+// Auto-save on agent_end — always save as main session
 agent.subscribe((event) => {
   if (event.type === "agent_end") {
     const messages = agent.state.messages.map((m: any) => ({
@@ -90,9 +122,8 @@ agent.subscribe((event) => {
     store
       .save({
         id: currentSessionId,
-        type: "sub",
-        spawnedBy: "user",
-        title: SessionStore.deriveTitle(messages),
+        type: "main",
+        title: SessionStore.deriveTitle(messages, "main"),
         createdAt: sessionCreatedAt,
         updatedAt: Date.now(),
         modelId: agent.state.model.id,

@@ -85,8 +85,9 @@ const en: Record<string, string> = {
   "cmd.logout_select": "Select provider to logout",
   "cmd.logout_success": "Logged out",
   "cmd.no_oauth_providers": "No OAuth providers available",
-  "cmd.new": "Archive current chat and start fresh",
-  "cmd.new_done": "Chat archived, starting fresh",
+  "cmd.new": "Archive memory and start fresh",
+  "cmd.new_done": "Starting fresh",
+  "cmd.memory_archived": "Memory archived",
 
   // Errors
   "error.prefix": "Error",
